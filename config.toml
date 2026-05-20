@@ -12,16 +12,9 @@ allow_fetch_failure = true
 
 # Add any number of top-level [[topics]] blocks.
 [[topics]]
-name = "Astrophysics - Cosmology"
-query = "cat:astro-ph.CO"
+name = "Computer Science - Performance"
+query = "cat:cs.PF"
 
-[[topics]]
-name = "Astrophysics - Galaxy"
-query = "cat:astro-ph.GA"
-
-[[topics]]
-name = "Astrophysics - High Energy"
-query = "cat:astro-ph.HE"
 
 [ai]
 base_url = "https://api.deepseek.com"
