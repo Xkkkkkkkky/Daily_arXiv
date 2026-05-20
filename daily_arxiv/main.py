@@ -26,14 +26,28 @@ def main(argv: list[str] | None = None) -> int:
             validate_email_config(config.email)
 
         report_date = _local_date(config.arxiv.timezone)
-        papers = fetch_new_papers(config.arxiv)
+        fetch_error = ""
+        try:
+            papers = fetch_new_papers(config.arxiv)
+        except Exception as exc:
+            if not config.arxiv.allow_fetch_failure:
+                raise
+            papers = []
+            fetch_error = str(exc)
+            print(f"arXiv fetch failed; sending failure digest instead: {fetch_error}", file=sys.stderr)
 
-        if args.skip_ai:
+        if fetch_error:
+            summary = _fetch_failure_summary(fetch_error, report_date)
+        elif args.skip_ai:
             summary = build_fallback_summary(papers, report_date)
         else:
             summary = summarize_papers(papers, config.ai, report_date)
 
-        subject = build_subject(config.email.subject_prefix, report_date, len(papers))
+        subject = (
+            f"{config.email.subject_prefix} - {report_date.isoformat()} - arXiv fetch failed"
+            if fetch_error
+            else build_subject(config.email.subject_prefix, report_date, len(papers))
+        )
         text_body = build_text_digest(summary, papers, report_date)
         html_body = build_html_digest(summary, papers, report_date)
 
@@ -54,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
 
 def _local_date(timezone: str) -> date:
     return datetime.now(ZoneInfo(timezone)).date()
+
+
+def _fetch_failure_summary(error: str, report_date: date) -> str:
+    return (
+        f"arXiv paper fetching failed after the configured retries on {report_date.isoformat()}, "
+        "so no AI summary was generated for this run.\n\n"
+        "The most likely cause is temporary arXiv API rate limiting or network timeout from the GitHub Actions runner.\n\n"
+        f"Error: {error}"
+    )
 
 
 if __name__ == "__main__":

@@ -76,8 +76,9 @@ lookback_days = 1
 timezone = "Asia/Shanghai"
 request_delay_seconds = 10.0
 timeout_seconds = 30
-retry_count = 5
+retry_count = 2
 retry_backoff_seconds = 60.0
+allow_fetch_failure = true
 
 [[topics]]
 name = "AI"
@@ -134,3 +135,7 @@ python3 -m daily_arxiv.main --config config.toml --skip-ai --no-email
 - `SMTP_PORT=587` 通常搭配 `SMTP_USE_TLS=true`。
 - `SMTP_PORT=465` 通常搭配 `SMTP_USE_SSL=true`、`SMTP_USE_TLS=false`。
 - 如果发件人和登录用户名不同，请确认邮件服务商允许代发。
+
+## arXiv 限流说明
+
+GitHub Actions 的共享出口 IP 偶尔会被 arXiv API 限流，表现为 `HTTP 429: Rate exceeded`。默认配置会重试并等待；如果仍然失败，`allow_fetch_failure = true` 会发送一封抓取失败通知邮件并让 workflow 正常结束。AI 或 SMTP 失败仍会让 workflow 失败，便于发现密钥或邮件配置问题。

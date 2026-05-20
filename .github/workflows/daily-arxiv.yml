@@ -9,6 +9,7 @@ on:
 jobs:
   send-digest:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 

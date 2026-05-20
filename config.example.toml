@@ -6,8 +6,9 @@ sort_by = "submittedDate"
 sort_order = "descending"
 request_delay_seconds = 10.0
 timeout_seconds = 30
-retry_count = 5
+retry_count = 2
 retry_backoff_seconds = 60.0
+allow_fetch_failure = true
 
 [[topics]]
 name = "AI"

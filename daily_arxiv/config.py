@@ -29,6 +29,7 @@ class ArxivConfig:
     timeout_seconds: int = 30
     retry_count: int = 2
     retry_backoff_seconds: float = 10.0
+    allow_fetch_failure: bool = True
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ def _load_arxiv_config(data: dict[str, Any]) -> ArxivConfig:
         timeout_seconds=_int(arxiv_data.get("timeout_seconds", 30), "arxiv.timeout_seconds"),
         retry_count=_int(arxiv_data.get("retry_count", 2), "arxiv.retry_count"),
         retry_backoff_seconds=_float(arxiv_data.get("retry_backoff_seconds", 10.0), "arxiv.retry_backoff_seconds"),
+        allow_fetch_failure=_bool(arxiv_data.get("allow_fetch_failure", True), "arxiv.allow_fetch_failure"),
     )
 
 
