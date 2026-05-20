@@ -34,6 +34,7 @@ class Paper:
     primary_category: str
     categories: tuple[str, ...]
     topics: tuple[str, ...]
+    comment: str = ""
 
 
 def fetch_new_papers(config: ArxivConfig, now: datetime | None = None) -> list[Paper]:
@@ -164,6 +165,7 @@ def _parse_entry(entry: ET.Element, topic: TopicConfig) -> Paper:
         primary_category=primary_category.attrib.get("term", "") if primary_category is not None else "",
         categories=categories,
         topics=(topic.name,),
+        comment=_clean_text(_text(entry, "arxiv:comment")),
     )
 
 

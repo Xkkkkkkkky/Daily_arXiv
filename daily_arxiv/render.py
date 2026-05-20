@@ -40,8 +40,10 @@ def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: d
                 "",
                 f"{index}. {paper.title}",
                 f"   Authors: {_format_authors(paper)}",
-                f"   Chinese title: {insight.chinese_title or 'Not provided'}",
                 f"   Importance: {insight.importance}/5 - {insight.importance_reason}",
+                f"   Comments: {_format_comments(paper)}",
+                f"   Subjects: {_format_subjects(paper)}",
+                f"   Chinese title: {insight.chinese_title or 'Not provided'}",
                 f"   Summary: {insight.summary}",
                 f"   arXiv: {paper.link}",
                 f"   PDF: {paper.pdf_url or 'N/A'}",
@@ -107,6 +109,8 @@ def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: d
 def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> str:
     insight = insights.get(_normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
     authors = _format_authors(paper)
+    comments = _format_comments(paper)
+    subjects = _format_subjects(paper)
     topics = ", ".join(paper.topics)
     pdf_link = _link_button(paper.pdf_url, "PDF") if paper.pdf_url else ""
     chinese_title = (
@@ -119,21 +123,24 @@ def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e1e8f0; border-radius:12px; margin:0 0 16px; background:#fbfdff;">
                 <tr>
                   <td style="padding:20px 20px 18px;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                      <tr>
-                        <td style="vertical-align:top;">
-                          <div style="font-size:12px; color:#6b7280; font-weight:700; margin-bottom:8px;">论文 {index} · {html.escape(topics)}</div>
-                        </td>
-                        <td align="right" style="vertical-align:top; width:120px;">
-                          {_rating_badge(insight.importance)}
-                        </td>
-                      </tr>
-                    </table>
+                    <div style="font-size:12px; color:#6b7280; font-weight:700; margin-bottom:8px;">论文 {index} · {html.escape(topics)}</div>
                     <a href="{html.escape(paper.link)}" style="font-size:19px; line-height:1.35; color:#0b63ce; font-weight:800; text-decoration:none;">{html.escape(paper.title)}</a>
                     {chinese_title}
                     <div style="margin:10px 0 12px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
                       <span style="font-size:13px; color:#475569; font-weight:800;">作者：</span>
                       <span style="font-size:13px; line-height:1.65; color:#334155;">{html.escape(authors)}</span>
+                      <div style="margin-top:8px;">
+                        <span style="font-size:13px; color:#475569; font-weight:800;">重要性：</span>
+                        {_rating_badge(insight.importance)}
+                      </div>
+                      <div style="margin-top:8px;">
+                        <span style="font-size:13px; color:#475569; font-weight:800;">Comments：</span>
+                        <span style="font-size:13px; line-height:1.65; color:#334155;">{html.escape(comments)}</span>
+                      </div>
+                      <div style="margin-top:8px;">
+                        <span style="font-size:13px; color:#475569; font-weight:800;">Subjects：</span>
+                        <span style="font-size:13px; line-height:1.65; color:#334155;">{html.escape(subjects)}</span>
+                      </div>
                     </div>
                     <div style="margin:14px 0 0; padding:14px 16px; background:#ffffff; border-left:4px solid #0b63ce; border-radius:8px;">
                       <div style="font-size:13px; color:#374151; font-weight:800; margin-bottom:6px;">中文摘要</div>
@@ -218,6 +225,15 @@ def _insights_by_id(summary: DailySummary) -> dict[str, PaperSummary]:
 
 def _format_authors(paper: Paper) -> str:
     return ", ".join(paper.authors) if paper.authors else "N/A"
+
+
+def _format_comments(paper: Paper) -> str:
+    return paper.comment.strip() or "N/A"
+
+
+def _format_subjects(paper: Paper) -> str:
+    subjects = paper.categories or ((paper.primary_category,) if paper.primary_category else ())
+    return ", ".join(subjects) if subjects else "N/A"
 
 
 def _normalize_arxiv_id(value: str) -> str:

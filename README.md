@@ -8,7 +8,7 @@
 - 自动过滤最近 `N` 天新发布论文，并按 arXiv ID 去重
 - 支持 OpenAI-compatible Chat Completions API，可接入 OpenAI、DeepSeek、OpenRouter、通义千问兼容接口等
 - 通过 SMTP 发送 HTML 和纯文本双格式邮件
-- 邮件按论文卡片排版，展示英文原题、中文标题、中文摘要和 AI 重要性评级
+- 邮件按论文卡片排版，展示英文原题、中文标题、作者、Comments、Subjects、中文摘要和 AI 重要性评级
 - GitHub Actions 每日定时运行，也支持手动触发
 - 无第三方 Python 依赖，GitHub Actions 不需要安装额外包
 
@@ -68,7 +68,7 @@
 
 ## 配置说明
 
-`config.example.toml` 示例：
+`config.example.toml` 示例。`[[topics]]` 是与 `[arxiv]`、`[ai]`、`[email]` 并列的顶层表，可以按同样格式添加任意数量：
 
 ```toml
 [arxiv]
@@ -81,6 +81,7 @@ retry_count = 2
 retry_backoff_seconds = 60.0
 allow_fetch_failure = true
 
+# Add any number of top-level [[topics]] blocks.
 [[topics]]
 name = "Astrophysics - Cosmology"
 query = "cat:astro-ph.CO"

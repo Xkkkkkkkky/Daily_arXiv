@@ -10,6 +10,7 @@ retry_count = 2
 retry_backoff_seconds = 60.0
 allow_fetch_failure = true
 
+# Add any number of top-level [[topics]] blocks.
 [[topics]]
 name = "Astrophysics - Cosmology"
 query = "cat:astro-ph.CO"

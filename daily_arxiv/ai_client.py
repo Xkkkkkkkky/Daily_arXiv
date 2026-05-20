@@ -95,6 +95,8 @@ def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
             "arxiv_id": paper.arxiv_id,
             "title": paper.title,
             "authors": paper.authors,
+            "comments": paper.comment,
+            "subjects": paper.categories,
             "topics": paper.topics,
             "primary_category": paper.primary_category,
             "published": paper.published.isoformat(),
