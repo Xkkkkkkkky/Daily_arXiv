@@ -24,8 +24,8 @@ name = "Astrophysics - High Energy"
 query = "cat:astro-ph.HE"
 
 [ai]
-base_url = "https://api.openai.com/v1"
-model = "gpt-4o-mini"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-pro"
 temperature = 0.2
 max_tokens = 4000
 language = "Simplified Chinese"
