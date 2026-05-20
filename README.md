@@ -71,7 +71,7 @@
 
 ```toml
 [arxiv]
-max_results_per_topic = 25
+max_results_per_topic = 5
 lookback_days = 1
 timezone = "Asia/Shanghai"
 request_delay_seconds = 10.0
@@ -81,16 +81,16 @@ retry_backoff_seconds = 60.0
 allow_fetch_failure = true
 
 [[topics]]
-name = "AI"
-query = "cat:cs.AI"
+name = "Astrophysics - Cosmology"
+query = "cat:astro-ph.CO"
 
 [[topics]]
-name = "Machine Learning"
-query = "cat:cs.LG"
+name = "Astrophysics - Galaxy"
+query = "cat:astro-ph.GA"
 
 [[topics]]
-name = "Computational Linguistics"
-query = "cat:cs.CL"
+name = "Astrophysics - High Energy"
+query = "cat:astro-ph.HE"
 
 [ai]
 base_url = "https://api.openai.com/v1"
@@ -115,6 +115,9 @@ arXiv 查询语法可以参考 arXiv API 的 `search_query`。常用分类示例
 - `cat:cs.CV`：Computer Vision and Pattern Recognition
 - `cat:cs.LG`：Machine Learning
 - `cat:stat.ML`：Machine Learning
+- `cat:astro-ph.CO`：Cosmology and Nongalactic Astrophysics
+- `cat:astro-ph.GA`：Astrophysics of Galaxies
+- `cat:astro-ph.HE`：High Energy Astrophysical Phenomena
 
 ## 命令
 
