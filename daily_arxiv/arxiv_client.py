@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 import socket
 import urllib.error
@@ -8,6 +9,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 
 from .config import ArxivConfig, TopicConfig
 
@@ -86,20 +88,43 @@ def _read_response(request: urllib.request.Request, config: ArxivConfig) -> byte
         except urllib.error.HTTPError as exc:
             if exc.code not in TRANSIENT_HTTP_STATUSES or attempt >= config.retry_count:
                 detail = exc.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"arXiv API returned HTTP {exc.code}: {detail[:500]}") from exc
-            _sleep_before_retry(config, attempt)
+                raise RuntimeError(
+                    f"arXiv API returned HTTP {exc.code} after {attempt + 1} attempt(s): {detail[:500]}"
+                ) from exc
+            retry_after = _retry_after_seconds(exc.headers.get("Retry-After"))
+            _sleep_before_retry(config, attempt, f"HTTP {exc.code}", retry_after)
         except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
             if attempt >= config.retry_count:
                 raise RuntimeError(f"arXiv API request failed after {attempt + 1} attempt(s): {exc}") from exc
-            _sleep_before_retry(config, attempt)
+            _sleep_before_retry(config, attempt, str(exc), None)
 
     raise RuntimeError("arXiv API request failed unexpectedly")
 
 
-def _sleep_before_retry(config: ArxivConfig, attempt: int) -> None:
-    delay = config.retry_backoff_seconds * (attempt + 1)
+def _sleep_before_retry(config: ArxivConfig, attempt: int, reason: str, retry_after: float | None) -> None:
+    delay = retry_after if retry_after is not None else config.retry_backoff_seconds * (attempt + 1)
     if delay > 0:
+        print(
+            f"arXiv request failed with {reason}; retrying in {delay:.0f}s "
+            f"(attempt {attempt + 2}/{config.retry_count + 1})",
+            file=sys.stderr,
+        )
         time.sleep(delay)
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        return max(0.0, (retry_at.astimezone(UTC) - datetime.now(UTC)).total_seconds())
 
 
 def _parse_entry(entry: ET.Element, topic: TopicConfig) -> Paper:

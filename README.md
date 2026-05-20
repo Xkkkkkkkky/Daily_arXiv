@@ -74,10 +74,10 @@
 max_results_per_topic = 25
 lookback_days = 1
 timezone = "Asia/Shanghai"
-request_delay_seconds = 3.0
+request_delay_seconds = 10.0
 timeout_seconds = 30
-retry_count = 2
-retry_backoff_seconds = 10.0
+retry_count = 5
+retry_backoff_seconds = 60.0
 
 [[topics]]
 name = "AI"
