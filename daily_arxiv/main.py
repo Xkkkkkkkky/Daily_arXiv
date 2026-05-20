@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .ai_client import build_fallback_summary, summarize_papers
+from .ai_client import DailySummary, build_fallback_summary, summarize_papers
 from .arxiv_client import fetch_new_papers
 from .config import ConfigError, load_config, validate_email_config
 from .emailer import send_email
@@ -70,12 +70,14 @@ def _local_date(timezone: str) -> date:
     return datetime.now(ZoneInfo(timezone)).date()
 
 
-def _fetch_failure_summary(error: str, report_date: date) -> str:
-    return (
-        f"arXiv paper fetching failed after the configured retries on {report_date.isoformat()}, "
-        "so no AI summary was generated for this run.\n\n"
-        "The most likely cause is temporary arXiv API rate limiting or network timeout from the GitHub Actions runner.\n\n"
-        f"Error: {error}"
+def _fetch_failure_summary(error: str, report_date: date) -> DailySummary:
+    return DailySummary(
+        overview=(
+            f"arXiv paper fetching failed after the configured retries on {report_date.isoformat()}, "
+            "so no AI summary was generated for this run.\n\n"
+            "The most likely cause is temporary arXiv API rate limiting or network timeout from the GitHub Actions runner.\n\n"
+            f"Error: {error}"
+        )
     )
 
 

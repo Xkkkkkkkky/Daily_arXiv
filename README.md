@@ -8,6 +8,7 @@
 - 自动过滤最近 `N` 天新发布论文，并按 arXiv ID 去重
 - 支持 OpenAI-compatible Chat Completions API，可接入 OpenAI、DeepSeek、OpenRouter、通义千问兼容接口等
 - 通过 SMTP 发送 HTML 和纯文本双格式邮件
+- 邮件按论文卡片排版，展示英文原题、中文标题、中文摘要和 AI 重要性评级
 - GitHub Actions 每日定时运行，也支持手动触发
 - 无第三方 Python 依赖，GitHub Actions 不需要安装额外包
 
@@ -96,7 +97,7 @@ query = "cat:astro-ph.HE"
 base_url = "https://api.openai.com/v1"
 model = "gpt-4o-mini"
 temperature = 0.2
-max_tokens = 3000
+max_tokens = 4000
 language = "Simplified Chinese"
 
 [email]

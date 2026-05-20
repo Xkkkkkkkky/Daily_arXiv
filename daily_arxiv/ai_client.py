@@ -3,15 +3,33 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import date
 
 from .arxiv_client import Paper
 from .config import AIConfig, ConfigError
 
 
-def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -> str:
+@dataclass(frozen=True)
+class PaperSummary:
+    arxiv_id: str
+    chinese_title: str
+    summary: str
+    importance: int
+    importance_reason: str
+
+
+@dataclass(frozen=True)
+class DailySummary:
+    overview: str
+    paper_summaries: tuple[PaperSummary, ...] = ()
+    shortlist: tuple[str, ...] = ()
+    raw_text: str = ""
+
+
+def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -> DailySummary:
     if not papers:
-        return "No new papers matched the configured arXiv topics for this run."
+        return DailySummary(overview="No new papers matched the configured arXiv topics for this run.")
     if not config.api_key:
         raise ConfigError("Missing AI_API_KEY or ai.api_key")
 
@@ -52,34 +70,21 @@ def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -
         raise RuntimeError(f"AI service returned HTTP {exc.code}: {detail}") from exc
 
     try:
-        return data["choices"][0]["message"]["content"].strip()
+        content = data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"Unexpected AI response shape: {data}") from exc
 
+    return _parse_digest(content, papers)
 
-def build_fallback_summary(papers: list[Paper], report_date: date) -> str:
+
+def build_fallback_summary(papers: list[Paper], report_date: date) -> DailySummary:
     if not papers:
-        return "No new papers matched the configured arXiv topics for this run."
+        return DailySummary(overview="No new papers matched the configured arXiv topics for this run.")
 
-    lines = [
-        f"# Daily arXiv Digest - {report_date.isoformat()}",
-        "",
-        "AI summarization was skipped. Below are the fetched papers and abstract snippets.",
-        "",
-    ]
-    for index, paper in enumerate(papers, start=1):
-        lines.extend(
-            [
-                f"## {index}. {paper.title}",
-                f"- arXiv: {paper.arxiv_id}",
-                f"- Topics: {', '.join(paper.topics)}",
-                f"- Authors: {', '.join(paper.authors[:8])}{' et al.' if len(paper.authors) > 8 else ''}",
-                f"- Link: {paper.link}",
-                f"- Abstract: {paper.abstract[:700]}{'...' if len(paper.abstract) > 700 else ''}",
-                "",
-            ]
-        )
-    return "\n".join(lines).strip()
+    return DailySummary(
+        overview=f"AI summarization was skipped for {report_date.isoformat()}. Below are abstract-based previews.",
+        paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
+    )
 
 
 def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
@@ -99,13 +104,105 @@ def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
     return (
         f"Report date: {report_date.isoformat()}\n"
         f"Output language: {language}\n\n"
-        "Create a daily arXiv digest in Markdown with this structure:\n"
-        "1. A short overall trend summary.\n"
-        "2. A numbered list of papers. For each paper include: problem, method, main contribution, and why it may matter.\n"
-        "3. A final 'worth reading first' shortlist of at most 5 papers with one-line reasons.\n\n"
-        "Keep each paper concise. If the abstract does not support a point, say it is not specified.\n\n"
+        "Return ONLY valid JSON. Do not wrap it in Markdown fences. Use this exact shape:\n"
+        "{\n"
+        '  "overview": "2-4 concise Chinese sentences summarizing the overall research trend.",\n'
+        '  "papers": [\n'
+        "    {\n"
+        '      "arxiv_id": "same arxiv_id from the input",\n'
+        '      "chinese_title": "accurate Chinese translation of the title",\n'
+        '      "summary": "Chinese summary in 80-140 Chinese characters: problem, method, key result/contribution.",\n'
+        '      "importance": 1,\n'
+        '      "importance_reason": "One Chinese sentence explaining the importance rating."\n'
+        "    }\n"
+        "  ],\n"
+        '  "shortlist": ["At most 5 Chinese bullet-style recommendations with arxiv_id and reason"]\n'
+        "}\n\n"
+        "Importance is an integer from 1 to 5: 5 means likely field-shaping or broadly useful; "
+        "4 means strong contribution worth prioritizing; 3 means solid but specialized; "
+        "2 means incremental or narrow; 1 means low confidence or mostly routine. "
+        "Include every input paper exactly once. If the abstract does not support a claim, say it is not specified.\n\n"
         "Papers JSON:\n"
         f"{json.dumps(paper_items, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
+    try:
+        data = json.loads(_strip_json_fence(content))
+    except json.JSONDecodeError:
+        return DailySummary(
+            overview=content,
+            paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
+            raw_text=content,
+        )
+    if not isinstance(data, dict):
+        return DailySummary(
+            overview=content,
+            paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
+            raw_text=content,
+        )
+
+    summaries_by_id: dict[str, PaperSummary] = {}
+    for item in data.get("papers", []):
+        if not isinstance(item, dict):
+            continue
+        arxiv_id = str(item.get("arxiv_id", "")).strip()
+        if not arxiv_id:
+            continue
+        summaries_by_id[arxiv_id] = PaperSummary(
+            arxiv_id=arxiv_id,
+            chinese_title=str(item.get("chinese_title", "")).strip(),
+            summary=str(item.get("summary", "")).strip(),
+            importance=_coerce_importance(item.get("importance", 3)),
+            importance_reason=str(item.get("importance_reason", "")).strip(),
+        )
+
+    shortlist = []
+    for item in data.get("shortlist", []):
+        text = str(item).strip()
+        if text:
+            shortlist.append(text)
+
+    return DailySummary(
+        overview=str(data.get("overview", "")).strip() or "AI did not provide an overview.",
+        paper_summaries=tuple(
+            summaries_by_id.get(paper.arxiv_id, _fallback_paper_summary(paper))
+            for paper in papers
+        ),
+        shortlist=tuple(shortlist[:5]),
+        raw_text=content,
+    )
+
+
+def _strip_json_fence(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
+    return stripped
+
+
+def _coerce_importance(value: object) -> int:
+    try:
+        importance = int(value)
+    except (TypeError, ValueError):
+        return 3
+    return min(5, max(1, importance))
+
+
+def _fallback_paper_summary(paper: Paper) -> PaperSummary:
+    abstract = paper.abstract[:260] + ("..." if len(paper.abstract) > 260 else "")
+    return PaperSummary(
+        arxiv_id=paper.arxiv_id,
+        chinese_title="",
+        summary=abstract,
+        importance=3,
+        importance_reason="AI 未提供结构化评级，暂按中等重要性展示。",
     )
 
 
