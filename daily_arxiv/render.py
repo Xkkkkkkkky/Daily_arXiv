@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 from datetime import date
 
 from .ai_client import DailySummary, PaperSummary
@@ -33,11 +34,12 @@ def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: d
 
     lines.append("Papers:")
     for index, paper in enumerate(papers, start=1):
-        insight = insights.get(paper.arxiv_id, _empty_insight(paper))
+        insight = insights.get(_normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
         lines.extend(
             [
                 "",
                 f"{index}. {paper.title}",
+                f"   Authors: {_format_authors(paper)}",
                 f"   Chinese title: {insight.chinese_title or 'Not provided'}",
                 f"   Importance: {insight.importance}/5 - {insight.importance_reason}",
                 f"   Summary: {insight.summary}",
@@ -49,7 +51,8 @@ def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: d
 
 
 def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: date) -> str:
-    paper_cards = "\n".join(_paper_card(index, paper, _insights_by_id(summary)) for index, paper in enumerate(papers, start=1))
+    insights = _insights_by_id(summary)
+    paper_cards = "\n".join(_paper_card(index, paper, insights) for index, paper in enumerate(papers, start=1))
     if not paper_cards:
         paper_cards = _empty_state()
 
@@ -102,10 +105,8 @@ def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: d
 
 
 def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> str:
-    insight = insights.get(paper.arxiv_id, _empty_insight(paper))
-    authors = ", ".join(paper.authors[:6])
-    if len(paper.authors) > 6:
-        authors += " et al."
+    insight = insights.get(_normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
+    authors = _format_authors(paper)
     topics = ", ".join(paper.topics)
     pdf_link = _link_button(paper.pdf_url, "PDF") if paper.pdf_url else ""
     chinese_title = (
@@ -130,6 +131,10 @@ def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> 
                     </table>
                     <a href="{html.escape(paper.link)}" style="font-size:19px; line-height:1.35; color:#0b63ce; font-weight:800; text-decoration:none;">{html.escape(paper.title)}</a>
                     {chinese_title}
+                    <div style="margin:10px 0 12px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+                      <span style="font-size:13px; color:#475569; font-weight:800;">作者：</span>
+                      <span style="font-size:13px; line-height:1.65; color:#334155;">{html.escape(authors)}</span>
+                    </div>
                     <div style="margin:14px 0 0; padding:14px 16px; background:#ffffff; border-left:4px solid #0b63ce; border-radius:8px;">
                       <div style="font-size:13px; color:#374151; font-weight:800; margin-bottom:6px;">中文摘要</div>
                       <div style="font-size:15px; line-height:1.72; color:#1f2937;">{html.escape(insight.summary)}</div>
@@ -139,7 +144,7 @@ def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> 
                       <span style="font-size:14px; line-height:1.65; color:#4b5563;">{html.escape(insight.importance_reason)}</span>
                     </div>
                     <div style="font-size:12px; line-height:1.6; color:#667085; margin:14px 0 0;">
-                      arXiv:{html.escape(paper.arxiv_id)} · {html.escape(authors)}
+                      arXiv:{html.escape(paper.arxiv_id)} · {html.escape(paper.published.date().isoformat())}
                     </div>
                     <div style="margin-top:14px;">
                       {_link_button(paper.link, "arXiv")}
@@ -208,7 +213,16 @@ def _empty_state() -> str:
 
 
 def _insights_by_id(summary: DailySummary) -> dict[str, PaperSummary]:
-    return {item.arxiv_id: item for item in summary.paper_summaries}
+    return {_normalize_arxiv_id(item.arxiv_id): item for item in summary.paper_summaries}
+
+
+def _format_authors(paper: Paper) -> str:
+    return ", ".join(paper.authors) if paper.authors else "N/A"
+
+
+def _normalize_arxiv_id(value: str) -> str:
+    arxiv_id = value.strip().rsplit("/", 1)[-1]
+    return re.sub(r"v\d+$", "", arxiv_id)
 
 
 def _empty_insight(paper: Paper) -> PaperSummary:

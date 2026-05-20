@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -50,6 +51,7 @@ def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -
         ],
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
+        "response_format": {"type": "json_object"},
     }
 
     request = urllib.request.Request(
@@ -109,7 +111,7 @@ def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
         '  "overview": "2-4 concise Chinese sentences summarizing the overall research trend.",\n'
         '  "papers": [\n'
         "    {\n"
-        '      "arxiv_id": "same arxiv_id from the input",\n'
+        '      "arxiv_id": "same arxiv_id from the input, preserving the version suffix such as v1",\n'
         '      "chinese_title": "accurate Chinese translation of the title",\n'
         '      "summary": "Chinese summary in 80-140 Chinese characters: problem, method, key result/contribution.",\n'
         '      "importance": 1,\n'
@@ -121,7 +123,8 @@ def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
         "Importance is an integer from 1 to 5: 5 means likely field-shaping or broadly useful; "
         "4 means strong contribution worth prioritizing; 3 means solid but specialized; "
         "2 means incremental or narrow; 1 means low confidence or mostly routine. "
-        "Include every input paper exactly once. If the abstract does not support a claim, say it is not specified.\n\n"
+        "Include every input paper exactly once. Put per-paper summaries only in papers[], not in overview or shortlist. "
+        "If the abstract does not support a claim, say it is not specified.\n\n"
         "Papers JSON:\n"
         f"{json.dumps(paper_items, ensure_ascii=False, indent=2)}"
     )
@@ -129,16 +132,16 @@ def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
 
 def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
     try:
-        data = json.loads(_strip_json_fence(content))
+        data = json.loads(_extract_json_object(content))
     except json.JSONDecodeError:
         return DailySummary(
-            overview=content,
+            overview="AI returned an unstructured response, so the email is showing abstract-based fallback cards.",
             paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
             raw_text=content,
         )
     if not isinstance(data, dict):
         return DailySummary(
-            overview=content,
+            overview="AI returned an unexpected response shape, so the email is showing abstract-based fallback cards.",
             paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
             raw_text=content,
         )
@@ -150,13 +153,14 @@ def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
         arxiv_id = str(item.get("arxiv_id", "")).strip()
         if not arxiv_id:
             continue
-        summaries_by_id[arxiv_id] = PaperSummary(
+        paper_summary = PaperSummary(
             arxiv_id=arxiv_id,
             chinese_title=str(item.get("chinese_title", "")).strip(),
             summary=str(item.get("summary", "")).strip(),
             importance=_coerce_importance(item.get("importance", 3)),
             importance_reason=str(item.get("importance_reason", "")).strip(),
         )
+        summaries_by_id[_normalize_arxiv_id(arxiv_id)] = paper_summary
 
     shortlist = []
     for item in data.get("shortlist", []):
@@ -167,7 +171,7 @@ def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
     return DailySummary(
         overview=str(data.get("overview", "")).strip() or "AI did not provide an overview.",
         paper_summaries=tuple(
-            summaries_by_id.get(paper.arxiv_id, _fallback_paper_summary(paper))
+            summaries_by_id.get(_normalize_arxiv_id(paper.arxiv_id), _fallback_paper_summary(paper))
             for paper in papers
         ),
         shortlist=tuple(shortlist[:5]),
@@ -175,7 +179,7 @@ def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
     )
 
 
-def _strip_json_fence(content: str) -> str:
+def _extract_json_object(content: str) -> str:
     stripped = content.strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()
@@ -183,8 +187,20 @@ def _strip_json_fence(content: str) -> str:
             lines = lines[1:]
         if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
-        return "\n".join(lines).strip()
+        stripped = "\n".join(lines).strip()
+    if stripped.startswith("{"):
+        return stripped
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        return stripped[start : end + 1]
     return stripped
+
+
+def _normalize_arxiv_id(value: str) -> str:
+    arxiv_id = value.strip().rsplit("/", 1)[-1]
+    return re.sub(r"v\d+$", "", arxiv_id)
 
 
 def _coerce_importance(value: object) -> int:
