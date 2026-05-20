@@ -1,0 +1,37 @@
+[arxiv]
+max_results_per_topic = 25
+lookback_days = 1
+timezone = "Asia/Shanghai"
+sort_by = "submittedDate"
+sort_order = "descending"
+request_delay_seconds = 3.0
+timeout_seconds = 30
+retry_count = 2
+retry_backoff_seconds = 10.0
+
+[[topics]]
+name = "AI"
+query = "cat:cs.AI"
+
+[[topics]]
+name = "Machine Learning"
+query = "cat:cs.LG"
+
+[[topics]]
+name = "Computational Linguistics"
+query = "cat:cs.CL"
+
+[ai]
+base_url = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+temperature = 0.2
+max_tokens = 3000
+language = "Simplified Chinese"
+
+[email]
+subject_prefix = "Daily arXiv"
+from = ""
+to = []
+smtp_port = 587
+smtp_use_tls = true
+smtp_use_ssl = false
