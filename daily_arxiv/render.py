@@ -242,7 +242,6 @@ def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary], sty
                       <span style="font-size:13px; color:#475569; font-weight:800;">作者：</span>
                       <span style="font-size:13px; line-height:1.65; color:#334155;">{html.escape(authors)}</span>
                       <div style="margin-top:8px;">
-                        <span style="font-size:13px; color:#475569; font-weight:800;">重要性：</span>
                         {_rating_badge(insight.importance)}
                       </div>
                       <div style="margin-top:8px;">
