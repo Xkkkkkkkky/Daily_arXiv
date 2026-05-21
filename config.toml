@@ -1,5 +1,5 @@
 [arxiv]
-max_results_per_topic = 5
+max_results_per_topic = 20
 lookback_days = 2
 timezone = "Asia/Shanghai"
 sort_by = "submittedDate"
@@ -12,9 +12,32 @@ allow_fetch_failure = true
 
 # Add any number of top-level [[topics]] blocks.
 [[topics]]
+name = "Instrumentation and Methods for Astrophysics - ASTROPHYSICS"
+query = "cat:astro-ph.IM"
+
+#[[topics]]
+#name = "Artificial Intelligence - Computer Science"
+#query = "cat:cs.AI"
+
+[[topics]]
+name = "Distributed, Parallel, and Cluster Computing - Computer Science"
+query = "cat:cs.DC"
+
+[[topics]]
+name = "Graphics - Computer Science"
+query = "cat:cs.GR"
+
+[[topics]]
+name = "Multiagent Systems - Computer Science"
+query = "cat:cs.MA"
+
+[[topics]]
+name = "Multimedia - Computer Science"
+query = "cat:cs.MM"
+
+[[topics]]
 name = "Performance - Computer Science"
 query = "cat:cs.PF"
-
 
 [ai]
 base_url = "https://api.deepseek.com"
@@ -27,11 +50,12 @@ language = "Simplified Chinese"
 priority_filter_enabled = true
 priority_filter_min_total = 10
 priority_filter_min_importance = 4
-priority_filter_max_papers = 12
+priority_filter_max_papers = 100
 
 [email]
 subject_prefix = "Daily arXiv"
 from = ""
+from_name = "Daily arXiv"
 to = []
 smtp_port = 587
 smtp_use_tls = true

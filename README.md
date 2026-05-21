@@ -78,7 +78,8 @@ priority_filter_max_papers = 12
 
 [email]
 subject_prefix = "Daily arXiv"
-from = "Daily arXiv <bot@example.com>"
+from = "bot@example.com"
+from_name = "Daily arXiv"
 to = ["you@example.com"]
 smtp_port = 587
 smtp_use_tls = true
@@ -110,7 +111,8 @@ Use environment variables locally or GitHub Actions Secrets in CI.
 | `SMTP_PASSWORD` | SMTP password or app password |
 | `SMTP_USE_TLS` | STARTTLS flag |
 | `SMTP_USE_SSL` | SMTP SSL flag |
-| `MAIL_FROM` | Sender |
+| `MAIL_FROM` | Sender email address |
+| `MAIL_FROM_NAME` | Sender display name |
 | `MAIL_TO` | Recipients, comma-separated |
 
 Example local run:
@@ -123,7 +125,8 @@ export SMTP_HOST="smtp.example.com"
 export SMTP_PORT="587"
 export SMTP_USER="bot@example.com"
 export SMTP_PASSWORD="..."
-export MAIL_FROM="Daily arXiv <bot@example.com>"
+export MAIL_FROM="bot@example.com"
+export MAIL_FROM_NAME="Daily arXiv"
 export MAIL_TO="you@example.com"
 python3 -m daily_arxiv.main --config config.toml
 ```

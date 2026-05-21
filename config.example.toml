@@ -1,17 +1,37 @@
 [arxiv]
+# Maximum papers requested for each topic before local filtering.
 max_results_per_topic = 5
+
+# Keep papers whose API published time is within the last N days.
 lookback_days = 1
+
+# Local timezone used for report date.
 timezone = "Asia/Shanghai"
+
+# arXiv API sorting field. Common values: submittedDate, lastUpdatedDate, relevance.
 sort_by = "submittedDate"
+
+# arXiv API sorting order. Values: descending or ascending.
 sort_order = "descending"
+
+# Delay between topic requests, in seconds. Keep at least 3s for arXiv politeness.
 request_delay_seconds = 10.0
+
+# arXiv request timeout in seconds.
 timeout_seconds = 90
+
+# Number of retries after transient arXiv failures.
 retry_count = 2
+
+# Linear retry backoff in seconds: 60, 120, ...
 retry_backoff_seconds = 60.0
+
+# If true, send a failure digest when arXiv fetch fails instead of failing the whole run.
 allow_fetch_failure = true
 
 # Add any number of top-level [[topics]] blocks.
 [[topics]]
+# Human-readable topic name shown in the email.
 name = "Astrophysics - Cosmology"
 query = "cat:astro-ph.CO"
 
@@ -24,22 +44,52 @@ name = "Astrophysics - High Energy"
 query = "cat:astro-ph.HE"
 
 [ai]
+# OpenAI-compatible API base URL. Can be overridden by AI_BASE_URL.
 base_url = "https://api.openai.com/v1"
+
+# Model name. Can be overridden by AI_MODEL.
 model = "gpt-4o-mini"
+
+# Sampling temperature for the summary.
 temperature = 0.2
+
+# Maximum tokens requested from the AI service.
 max_tokens = 4000
+
+# Output language instruction sent to the AI.
 language = "Simplified Chinese"
 
 [digest]
+# Enable final email display filtering by AI importance rating.
 priority_filter_enabled = true
+
+# Apply filtering only when fetched paper count is greater than this number.
 priority_filter_min_total = 10
+
+# Minimum AI importance rating to show when filtering is active.
 priority_filter_min_importance = 4
+
+# Maximum number of papers shown in the final email after filtering.
 priority_filter_max_papers = 12
 
 [email]
+# Email subject prefix.
 subject_prefix = "Daily arXiv"
-from = "Daily arXiv <bot@example.com>"
+
+# Sender email address. Can be overridden by MAIL_FROM.
+from = "bot@example.com"
+
+# Sender display name. Can be overridden by MAIL_FROM_NAME.
+from_name = "Daily arXiv"
+
+# Recipient email addresses. Can be overridden by MAIL_TO.
 to = ["you@example.com"]
+
+# SMTP server port. Usually 587 for STARTTLS or 465 for SSL.
 smtp_port = 587
+
+# Use STARTTLS after connecting to SMTP.
 smtp_use_tls = true
+
+# Use SMTP over SSL from the start.
 smtp_use_ssl = false

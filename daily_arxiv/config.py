@@ -52,6 +52,7 @@ class EmailConfig:
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
     mail_from: str = ""
+    mail_from_name: str = ""
     mail_to: tuple[str, ...] = ()
     subject_prefix: str = "Daily arXiv"
 
@@ -186,6 +187,7 @@ def _load_email_config(email_data: dict[str, Any]) -> EmailConfig:
         smtp_use_tls=_bool(_env("SMTP_USE_TLS") or email_data.get("smtp_use_tls", True), "email.smtp_use_tls"),
         smtp_use_ssl=_bool(_env("SMTP_USE_SSL") or email_data.get("smtp_use_ssl", False), "email.smtp_use_ssl"),
         mail_from=_env("MAIL_FROM") or str(email_data.get("from", "")).strip(),
+        mail_from_name=_env("MAIL_FROM_NAME") or str(email_data.get("from_name", "")).strip(),
         mail_to=mail_to,
         subject_prefix=str(email_data.get("subject_prefix", "Daily arXiv")).strip(),
     )

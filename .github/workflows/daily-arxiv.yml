@@ -46,5 +46,6 @@ jobs:
           SMTP_USE_TLS: ${{ secrets.SMTP_USE_TLS }}
           SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_FROM_NAME: ${{ secrets.MAIL_FROM_NAME }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python -m daily_arxiv.main --config config.toml
