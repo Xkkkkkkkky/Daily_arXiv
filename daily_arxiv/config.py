@@ -57,10 +57,19 @@ class EmailConfig:
 
 
 @dataclass(frozen=True)
+class DigestConfig:
+    priority_filter_enabled: bool = False
+    priority_filter_min_total: int = 10
+    priority_filter_min_importance: int = 4
+    priority_filter_max_papers: int = 12
+
+
+@dataclass(frozen=True)
 class AppConfig:
     arxiv: ArxivConfig
     ai: AIConfig
     email: EmailConfig
+    digest: DigestConfig
 
 
 def load_config(path: Path) -> AppConfig:
@@ -74,6 +83,7 @@ def load_config(path: Path) -> AppConfig:
         arxiv=_load_arxiv_config(data),
         ai=_load_ai_config(data.get("ai", {})),
         email=_load_email_config(data.get("email", {})),
+        digest=_load_digest_config(data.get("digest", {})),
     )
 
 
@@ -155,6 +165,34 @@ def _load_email_config(email_data: dict[str, Any]) -> EmailConfig:
         mail_to=mail_to,
         subject_prefix=str(email_data.get("subject_prefix", "Daily arXiv")).strip(),
     )
+
+
+def _load_digest_config(digest_data: dict[str, Any]) -> DigestConfig:
+    config = DigestConfig(
+        priority_filter_enabled=_bool(
+            digest_data.get("priority_filter_enabled", False),
+            "digest.priority_filter_enabled",
+        ),
+        priority_filter_min_total=_int(
+            digest_data.get("priority_filter_min_total", 10),
+            "digest.priority_filter_min_total",
+        ),
+        priority_filter_min_importance=_int(
+            digest_data.get("priority_filter_min_importance", 4),
+            "digest.priority_filter_min_importance",
+        ),
+        priority_filter_max_papers=_int(
+            digest_data.get("priority_filter_max_papers", 12),
+            "digest.priority_filter_max_papers",
+        ),
+    )
+    if config.priority_filter_min_total < 0:
+        raise ConfigError("digest.priority_filter_min_total must be >= 0")
+    if not 1 <= config.priority_filter_min_importance <= 5:
+        raise ConfigError("digest.priority_filter_min_importance must be between 1 and 5")
+    if config.priority_filter_max_papers < 0:
+        raise ConfigError("digest.priority_filter_max_papers must be >= 0")
+    return config
 
 
 def _env(name: str) -> str | None:

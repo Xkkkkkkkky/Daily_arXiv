@@ -1,104 +1,89 @@
 # Daily_arXiv
 
-每日抓取 arXiv 指定领域的新文章，调用在线 AI 服务生成中文摘要，并通过邮件推送到指定邮箱。项目默认按 GitHub Actions 定时运行，也可以在本地手动执行。
+Daily_arXiv fetches recent arXiv papers for configured topics, asks an OpenAI-compatible AI service for Chinese summaries and importance ratings, then sends a clean HTML/plain-text email digest through SMTP.
 
-## 功能
+Daily_arXiv 会按配置抓取 arXiv 论文，调用兼容 OpenAI Chat Completions 的 AI 服务生成中文摘要与重要性评级，并通过 SMTP 发送 HTML/纯文本邮件。
 
-- 支持配置多个 arXiv 领域或搜索表达式，例如 `cat:cs.AI`、`cat:cs.CL`、`cat:cs.LG`
-- 自动过滤最近 `N` 天新发布论文，并按 arXiv ID 去重
-- 支持 OpenAI-compatible Chat Completions API，可接入 OpenAI、DeepSeek、OpenRouter、通义千问兼容接口等
-- 通过 SMTP 发送 HTML 和纯文本双格式邮件
-- 邮件按论文卡片排版，展示英文原题、中文标题、作者、Comments、Subjects、中文摘要和 AI 重要性评级
-- GitHub Actions 每日定时运行，也支持手动触发
-- 使用 `arxiv` Python 包抓取和解析 arXiv API 响应，减少手写 Atom 解析逻辑
+## Features / 功能
 
-## 快速开始
+- Multiple arXiv topics with top-level `[[topics]]` blocks.
+- Uses the `arxiv` Python package for API fetching and parsing.
+- Deduplicates papers by arXiv ID and keeps topic labels.
+- Shows title, Chinese title, authors, comments, subjects, summary, links, and AI importance rating.
+- Optional display filter: when there are many papers, only high-rated papers are shown in the final email.
+- Runs locally or daily via GitHub Actions.
+
+- 支持任意数量的顶层 `[[topics]]`。
+- 使用 `arxiv` Python 包抓取和解析 API 结果。
+- 按 arXiv ID 去重，并保留命中的 topic 标签。
+- 邮件展示原文标题、中文标题、作者、Comments、Subjects、摘要、链接和 AI 重要性评级。
+- 支持最终邮件按评级筛选，文章很多时只展示高优先级论文。
+- 支持本地运行和 GitHub Actions 定时运行。
+
+## Setup / 安装
+
+Requires Python 3.11+.
 
 需要 Python 3.11 或更高版本。
 
-1. 复制配置文件：
+```bash
+cp config.example.toml config.toml
+python3 -m pip install -r requirements.txt
+```
 
-   ```bash
-   cp config.example.toml config.toml
-   ```
+Edit `config.toml` for topics and non-secret defaults. Keep API keys and SMTP passwords in environment variables or GitHub Secrets.
 
-2. 安装依赖：
+编辑 `config.toml` 配置 topics 和非敏感默认值。API Key 与 SMTP 密码应放在环境变量或 GitHub Secrets 中。
 
-   ```bash
-   python3 -m pip install -r requirements.txt
-   ```
+## Run / 运行
 
-3. 编辑 `config.toml`，设置 arXiv 领域、收件人、发件人等非敏感配置。
+```bash
+# Build digest without AI or email / 不调用 AI、不发邮件
+python3 -m daily_arxiv.main --config config.toml --skip-ai --no-email
 
-4. 本地测试抓取和邮件正文渲染：
+# Build digest with AI, print instead of sending / 调用 AI，但只打印不发邮件
+python3 -m daily_arxiv.main --config config.toml --no-email
 
-   ```bash
-   python3 -m daily_arxiv.main --config config.toml --skip-ai --no-email
-   ```
+# Full run / 完整运行
+python3 -m daily_arxiv.main --config config.toml
+```
 
-5. 本地完整运行需要设置环境变量：
+Required environment variables for full local runs:
 
-   ```bash
-   export AI_API_KEY="your-ai-api-key"
-   export SMTP_HOST="smtp.example.com"
-   export SMTP_PORT="587"
-   export SMTP_USER="bot@example.com"
-   export SMTP_PASSWORD="your-smtp-password"
-   export MAIL_FROM="Daily arXiv <bot@example.com>"
-   export MAIL_TO="you@example.com"
+本地完整运行需要：
 
-   python3 -m daily_arxiv.main --config config.toml
-   ```
+```bash
+export AI_API_KEY="your-ai-api-key"
+export SMTP_HOST="smtp.example.com"
+export SMTP_PORT="587"
+export SMTP_USER="bot@example.com"
+export SMTP_PASSWORD="your-smtp-password"
+export MAIL_FROM="Daily arXiv <bot@example.com>"
+export MAIL_TO="you@example.com"
+```
 
-## GitHub Actions 配置
+## Config / 配置
 
-工作流文件位于 `.github/workflows/daily-arxiv.yml`，默认每天北京时间 07:00 运行一次，也可以在 GitHub Actions 页面手动触发。
+Minimal shape:
 
-在仓库的 `Settings -> Secrets and variables -> Actions -> Secrets` 中添加以下 Secrets：
-
-| Secret | 说明 |
-| --- | --- |
-| `AI_API_KEY` | 在线 AI 服务 API Key |
-| `AI_BASE_URL` | 可选，OpenAI-compatible API 地址，默认 `https://api.openai.com/v1` |
-| `AI_MODEL` | 可选，模型名，默认读取配置文件里的 `ai.model` |
-| `SMTP_HOST` | SMTP 服务器地址 |
-| `SMTP_PORT` | SMTP 端口，常见为 `587` 或 `465` |
-| `SMTP_USER` | SMTP 登录用户名 |
-| `SMTP_PASSWORD` | SMTP 登录密码或应用专用密码 |
-| `SMTP_USE_TLS` | 可选，是否启用 STARTTLS，默认 `true` |
-| `SMTP_USE_SSL` | 可选，是否使用 SMTP SSL，默认 `false` |
-| `MAIL_FROM` | 发件人地址，可覆盖配置文件 |
-| `MAIL_TO` | 收件人地址，多个地址用逗号分隔，可覆盖配置文件 |
-
-注意：如果你希望 GitHub Actions 读取 `config.toml`，需要把不含密钥的 `config.toml` 提交到仓库。API Key 和 SMTP 密码不要写入配置文件。
-
-## 配置说明
-
-`config.example.toml` 示例。`[[topics]]` 是与 `[arxiv]`、`[ai]`、`[email]` 并列的顶层表，可以按同样格式添加任意数量：
+基础结构：
 
 ```toml
 [arxiv]
 max_results_per_topic = 5
 lookback_days = 1
 timezone = "Asia/Shanghai"
+sort_by = "submittedDate"
+sort_order = "descending"
 request_delay_seconds = 10.0
-timeout_seconds = 30
+timeout_seconds = 90
 retry_count = 2
 retry_backoff_seconds = 60.0
 allow_fetch_failure = true
 
-# Add any number of top-level [[topics]] blocks.
 [[topics]]
 name = "Astrophysics - Cosmology"
 query = "cat:astro-ph.CO"
-
-[[topics]]
-name = "Astrophysics - Galaxy"
-query = "cat:astro-ph.GA"
-
-[[topics]]
-name = "Astrophysics - High Energy"
-query = "cat:astro-ph.HE"
 
 [ai]
 base_url = "https://api.openai.com/v1"
@@ -106,6 +91,12 @@ model = "gpt-4o-mini"
 temperature = 0.2
 max_tokens = 4000
 language = "Simplified Chinese"
+
+[digest]
+priority_filter_enabled = true
+priority_filter_min_total = 10
+priority_filter_min_importance = 4
+priority_filter_max_papers = 12
 
 [email]
 subject_prefix = "Daily arXiv"
@@ -116,37 +107,48 @@ smtp_use_tls = true
 smtp_use_ssl = false
 ```
 
-arXiv 查询语法可以参考 arXiv API 的 `search_query`。常用分类示例：
+`[[topics]]` is top-level and repeatable. Example queries: `cat:cs.AI`, `cat:cs.CL`, `cat:cs.CV`, `cat:cs.LG`, `cat:stat.ML`, `cat:astro-ph.CO`, `cat:astro-ph.GA`, `cat:astro-ph.HE`.
 
-- `cat:cs.AI`：Artificial Intelligence
-- `cat:cs.CL`：Computation and Language
-- `cat:cs.CV`：Computer Vision and Pattern Recognition
-- `cat:cs.LG`：Machine Learning
-- `cat:stat.ML`：Machine Learning
-- `cat:astro-ph.CO`：Cosmology and Nongalactic Astrophysics
-- `cat:astro-ph.GA`：Astrophysics of Galaxies
-- `cat:astro-ph.HE`：High Energy Astrophysical Phenomena
+`[[topics]]` 是可重复的顶层表。常见查询包括：`cat:cs.AI`、`cat:cs.CL`、`cat:cs.CV`、`cat:cs.LG`、`cat:stat.ML`、`cat:astro-ph.CO`、`cat:astro-ph.GA`、`cat:astro-ph.HE`。
 
-## 命令
+The `[digest]` filter affects only final email display, not arXiv fetching or AI summarization. With the example above, if more than 10 papers are fetched, the email shows papers rated at least 4/5, capped at 12 papers. If none meet the rating threshold, it falls back to the highest-rated papers.
 
-```bash
-# 正常运行：抓取、总结、发邮件
-python3 -m daily_arxiv.main --config config.toml
+`[digest]` 只影响最终邮件展示，不影响抓取和 AI 总结。以上示例表示：当抓取论文数超过 10 篇时，邮件优先展示评级不低于 4/5 的论文，最多 12 篇；如果没有论文达到阈值，则退回展示评分最高的论文。
 
-# 只生成正文并打印，不发送邮件
-python3 -m daily_arxiv.main --config config.toml --no-email
+## GitHub Actions / GitHub Actions
 
-# 不调用 AI，用论文标题和摘要片段生成调试正文
-python3 -m daily_arxiv.main --config config.toml --skip-ai --no-email
-```
+The workflow is `.github/workflows/daily-arxiv.yml`. It runs daily at 23:00 UTC, i.e. 07:00 Asia/Shanghai, and also supports manual dispatch.
 
-## 邮件服务提示
+工作流文件是 `.github/workflows/daily-arxiv.yml`。默认每天 UTC 23:00，即北京时间 07:00 运行，也支持手动触发。
 
-- Gmail、Outlook、QQ 邮箱等通常需要开启 SMTP，并使用应用专用密码。
-- `SMTP_PORT=587` 通常搭配 `SMTP_USE_TLS=true`。
-- `SMTP_PORT=465` 通常搭配 `SMTP_USE_SSL=true`、`SMTP_USE_TLS=false`。
-- 如果发件人和登录用户名不同，请确认邮件服务商允许代发。
+Add these repository secrets:
 
-## arXiv 限流说明
+需要添加以下仓库 Secrets：
 
-GitHub Actions 的共享出口 IP 偶尔会被 arXiv API 限流，表现为 `HTTP 429: Rate exceeded`。默认配置会重试并等待；如果仍然失败，`allow_fetch_failure = true` 会发送一封抓取失败通知邮件并让 workflow 正常结束。AI 或 SMTP 失败仍会让 workflow 失败，便于发现密钥或邮件配置问题。
+| Secret | Meaning / 含义 |
+| --- | --- |
+| `AI_API_KEY` | AI service API key |
+| `AI_BASE_URL` | Optional OpenAI-compatible base URL |
+| `AI_MODEL` | Optional model override |
+| `SMTP_HOST` | SMTP host |
+| `SMTP_PORT` | SMTP port, usually `587` or `465` |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASSWORD` | SMTP password or app password |
+| `SMTP_USE_TLS` | Optional STARTTLS flag |
+| `SMTP_USE_SSL` | Optional SMTP SSL flag |
+| `MAIL_FROM` | Sender address |
+| `MAIL_TO` | Recipient addresses, comma-separated |
+
+Do not commit secrets. `config.toml` should contain only non-sensitive defaults.
+
+不要提交密钥。`config.toml` 只应包含非敏感默认配置。
+
+## Notes / 说明
+
+- arXiv API may return `HTTP 429` or time out, especially from shared GitHub Actions IPs.
+- `allow_fetch_failure = true` sends a fetch-failure digest instead of failing the whole workflow.
+- arXiv API `published` dates may differ from the website list date; use `lookback_days = 2` or `3` if daily windows miss papers.
+
+- arXiv API 可能返回 `HTTP 429` 或超时，GitHub Actions 共享出口更常见。
+- `allow_fetch_failure = true` 会发送抓取失败通知，而不是让整个 workflow 直接失败。
+- arXiv API 的 `published` 日期可能不同于网页列表日期；如果每日窗口漏文章，可以把 `lookback_days` 设为 `2` 或 `3`。

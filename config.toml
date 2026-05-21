@@ -23,6 +23,12 @@ temperature = 0.2
 max_tokens = 4000
 language = "Simplified Chinese"
 
+[digest]
+priority_filter_enabled = true
+priority_filter_min_total = 10
+priority_filter_min_importance = 4
+priority_filter_max_papers = 12
+
 [email]
 subject_prefix = "Daily arXiv"
 from = ""
