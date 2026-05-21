@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
 from .arxiv_client import Paper, normalize_arxiv_id
 from .config import AIConfig, ConfigError
+
+
+StatusLogger = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -27,12 +31,72 @@ class DailySummary:
     raw_text: str = ""
 
 
-def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -> DailySummary:
+def summarize_papers(
+    papers: list[Paper],
+    config: AIConfig,
+    report_date: date,
+    status: StatusLogger | None = None,
+) -> DailySummary:
     if not papers:
         return DailySummary(overview="No new papers matched the configured arXiv topics for this run.")
     if not config.api_key:
         raise ConfigError("Missing AI_API_KEY or ai.api_key")
 
+    summaries: list[PaperSummary] = []
+    raw_responses: list[str] = []
+    fallback_count = 0
+    total_count = len(papers)
+    _log(status, f"AI: starting per-paper summarization for {total_count} paper(s)")
+
+    for index, paper in enumerate(papers, start=1):
+        _log(status, f"AI: requesting summary {index}/{total_count} for {paper.arxiv_id}")
+        try:
+            content = _request_paper_summary(paper, config, report_date, index, total_count)
+            raw_responses.append(f"{paper.arxiv_id}\n{content}")
+            paper_summary = _parse_paper_summary(content, paper)
+            if paper_summary is None:
+                fallback_count += 1
+                _log(status, f"AI: response for {paper.arxiv_id} was not valid JSON; using fallback card")
+                paper_summary = _fallback_paper_summary(
+                    paper,
+                    "AI 未返回可解析的结构化结果，暂按摘要内容与中等重要性展示。",
+                )
+            else:
+                _log(status, f"AI: parsed {paper.arxiv_id} with importance {paper_summary.importance}/5")
+        except Exception as exc:
+            fallback_count += 1
+            _log(status, f"AI: request for {paper.arxiv_id} failed: {_short_error(exc)}; using fallback card")
+            paper_summary = _fallback_paper_summary(
+                paper,
+                f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
+            )
+        summaries.append(paper_summary)
+
+    return DailySummary(
+        overview=_build_overview(summaries, report_date, fallback_count),
+        paper_summaries=tuple(summaries),
+        shortlist=_build_shortlist(summaries),
+        raw_text="\n\n".join(raw_responses),
+    )
+
+
+def build_fallback_summary(papers: list[Paper], report_date: date) -> DailySummary:
+    if not papers:
+        return DailySummary(overview="No new papers matched the configured arXiv topics for this run.")
+
+    return DailySummary(
+        overview=f"AI summarization was skipped for {report_date.isoformat()}. Below are abstract-based previews.",
+        paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
+    )
+
+
+def _request_paper_summary(
+    paper: Paper,
+    config: AIConfig,
+    report_date: date,
+    index: int,
+    total_count: int,
+) -> str:
     payload = {
         "model": config.model,
         "messages": [
@@ -40,19 +104,19 @@ def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -
                 "role": "system",
                 "content": (
                     "You are a careful research assistant. Write concise daily arXiv digests. "
-                    "Do not invent claims that are not supported by the supplied metadata or abstract."
+                    "Return strict JSON only. Do not invent claims that are not supported by the supplied metadata "
+                    "or abstract."
                 ),
             },
             {
                 "role": "user",
-                "content": _build_prompt(papers, config.language, report_date),
+                "content": _build_paper_prompt(paper, config.language, report_date, index, total_count),
             },
         ],
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
         "response_format": {"type": "json_object"},
     }
-
     request = urllib.request.Request(
         _chat_completions_url(config.base_url),
         data=json.dumps(payload).encode("utf-8"),
@@ -68,114 +132,119 @@ def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"AI service returned HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"AI service request failed: {exc.reason}") from exc
 
     try:
-        content = data["choices"][0]["message"]["content"].strip()
+        return data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError("Unexpected AI response shape") from exc
 
-    return _parse_digest(content, papers)
 
-
-def build_fallback_summary(papers: list[Paper], report_date: date) -> DailySummary:
-    if not papers:
-        return DailySummary(overview="No new papers matched the configured arXiv topics for this run.")
-
-    return DailySummary(
-        overview=f"AI summarization was skipped for {report_date.isoformat()}. Below are abstract-based previews.",
-        paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
-    )
-
-
-def _build_prompt(papers: list[Paper], language: str, report_date: date) -> str:
-    paper_items = [
-        {
-            "arxiv_id": paper.arxiv_id,
-            "title": paper.title,
-            "authors": paper.authors,
-            "comments": paper.comment,
-            "subjects": paper.categories,
-            "topics": paper.topics,
-            "primary_category": paper.primary_category,
-            "published": paper.published.isoformat(),
-            "link": paper.link,
-            "abstract": paper.abstract,
-        }
-        for paper in papers
-    ]
+def _build_paper_prompt(
+    paper: Paper,
+    language: str,
+    report_date: date,
+    index: int,
+    total_count: int,
+) -> str:
     return (
         f"Report date: {report_date.isoformat()}\n"
+        f"Daily paper count: {total_count}\n"
+        f"Current paper index: {index}/{total_count}\n"
         f"Output language: {language}\n\n"
         "Return ONLY valid JSON. Do not wrap it in Markdown fences. Use this exact shape:\n"
         "{\n"
-        '  "overview": "2-4 concise Chinese sentences summarizing the overall research trend.",\n'
-        '  "papers": [\n'
-        "    {\n"
-        '      "arxiv_id": "same arxiv_id from the input, preserving the version suffix such as v1",\n'
-        '      "chinese_title": "accurate Chinese translation of the title",\n'
-        '      "summary": "Chinese summary in 80-140 Chinese characters: problem, method, key result/contribution.",\n'
-        '      "importance": 1,\n'
-        '      "importance_reason": "One Chinese sentence explaining the importance rating."\n'
-        "    }\n"
-        "  ],\n"
-        '  "shortlist": ["At most 5 Chinese bullet-style recommendations with arxiv_id and reason"]\n'
+        '  "arxiv_id": "same arxiv_id from the input, preserving the version suffix such as v1",\n'
+        '  "chinese_title": "accurate Chinese translation of the title",\n'
+        '  "summary": "Chinese summary in 80-140 Chinese characters: problem, method, key result/contribution.",\n'
+        '  "importance": 1,\n'
+        '  "importance_reason": "One Chinese sentence explaining the importance rating."\n'
         "}\n\n"
-        "Importance is an integer from 1 to 5: 5 means likely field-shaping or broadly useful; "
-        "4 means strong contribution worth prioritizing; 3 means solid but specialized; "
-        "2 means incremental or narrow; 1 means low confidence or mostly routine. "
-        "Include every input paper exactly once. Put per-paper summaries only in papers[], not in overview or shortlist. "
+        "Use the same fixed rating standard for every paper in today's run. Do not score relatively against only "
+        "this one paper, and do not inflate scores because the request contains a single paper. Importance is an "
+        "integer from 1 to 5:\n"
+        "5 = likely field-shaping, broadly useful, or unusually strong evidence/method/release;\n"
+        "4 = strong contribution worth prioritizing for the topic;\n"
+        "3 = solid but specialized or mainly useful to a narrower audience;\n"
+        "2 = incremental, limited scope, or unclear empirical strength;\n"
+        "1 = low confidence, routine, or insufficient information in the abstract.\n"
         "If the abstract does not support a claim, say it is not specified.\n\n"
-        "Papers JSON:\n"
-        f"{json.dumps(paper_items, ensure_ascii=False, indent=2)}"
+        "Paper JSON:\n"
+        f"{json.dumps(_paper_payload(paper), ensure_ascii=False, indent=2)}"
     )
 
 
-def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
+def _paper_payload(paper: Paper) -> dict[str, object]:
+    return {
+        "arxiv_id": paper.arxiv_id,
+        "title": paper.title,
+        "authors": paper.authors,
+        "comments": paper.comment,
+        "subjects": paper.categories,
+        "topics": paper.topics,
+        "primary_category": paper.primary_category,
+        "published": paper.published.isoformat(),
+        "link": paper.link,
+        "abstract": paper.abstract,
+    }
+
+
+def _parse_paper_summary(content: str, paper: Paper) -> PaperSummary | None:
     try:
         data = json.loads(_extract_json_object(content))
     except json.JSONDecodeError:
-        return DailySummary(
-            overview="AI returned an unstructured response, so the email is showing abstract-based fallback cards.",
-            paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
-            raw_text=content,
-        )
-    if not isinstance(data, dict):
-        return DailySummary(
-            overview="AI returned an unexpected response shape, so the email is showing abstract-based fallback cards.",
-            paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
-            raw_text=content,
-        )
+        return None
+    item = _extract_paper_summary_object(data, paper)
+    if item is None:
+        return None
 
-    summaries_by_id: dict[str, PaperSummary] = {}
-    for item in data.get("papers", []):
-        if not isinstance(item, dict):
-            continue
-        arxiv_id = str(item.get("arxiv_id", "")).strip()
-        if not arxiv_id:
-            continue
-        paper_summary = PaperSummary(
-            arxiv_id=arxiv_id,
-            chinese_title=str(item.get("chinese_title", "")).strip(),
-            summary=str(item.get("summary", "")).strip(),
-            importance=_coerce_importance(item.get("importance", 3)),
-            importance_reason=str(item.get("importance_reason", "")).strip(),
-        )
-        summaries_by_id[normalize_arxiv_id(arxiv_id)] = paper_summary
+    summary = str(item.get("summary", "")).strip()
+    if not summary:
+        return None
+    return PaperSummary(
+        arxiv_id=paper.arxiv_id,
+        chinese_title=str(item.get("chinese_title", "")).strip(),
+        summary=summary,
+        importance=_coerce_importance(item.get("importance", 3)),
+        importance_reason=str(item.get("importance_reason", "")).strip() or "AI 未提供评级理由。",
+    )
 
-    shortlist = []
-    for item in data.get("shortlist", []):
-        text = str(item).strip()
-        if text:
-            shortlist.append(text)
 
-    return DailySummary(
-        overview=str(data.get("overview", "")).strip() or "AI did not provide an overview.",
-        paper_summaries=tuple(
-            summaries_by_id.get(normalize_arxiv_id(paper.arxiv_id), _fallback_paper_summary(paper))
-            for paper in papers
-        ),
-        shortlist=tuple(shortlist[:5]),
-        raw_text=content,
+def _extract_paper_summary_object(data: object, paper: Paper) -> dict[str, object] | None:
+    if isinstance(data, dict) and "papers" not in data:
+        return data
+    if isinstance(data, dict) and isinstance(data.get("papers"), list):
+        for item in data["papers"]:
+            if not isinstance(item, dict):
+                continue
+            arxiv_id = str(item.get("arxiv_id", "")).strip()
+            if not arxiv_id or normalize_arxiv_id(arxiv_id) == normalize_arxiv_id(paper.arxiv_id):
+                return item
+    return None
+
+
+def _build_overview(summaries: list[PaperSummary], report_date: date, fallback_count: int) -> str:
+    total = len(summaries)
+    counts = {rating: 0 for rating in range(1, 6)}
+    for item in summaries:
+        counts[_coerce_importance(item.importance)] += 1
+    distribution = "，".join(f"{rating}分{counts[rating]}篇" for rating in range(5, 0, -1))
+    overview = (
+        f"{report_date.isoformat()} 本次共处理 {total} 篇 arXiv 论文。"
+        f"AI 按统一 1-5 分标准逐篇生成中文标题、摘要与重要性评级；评分分布为：{distribution}。"
+    )
+    if fallback_count:
+        overview += f" 其中 {fallback_count} 篇因 AI 响应异常或不可解析使用摘要回退，评级暂按 3/5 展示。"
+    return overview
+
+
+def _build_shortlist(summaries: list[PaperSummary]) -> tuple[str, ...]:
+    ranked = sorted(summaries, key=lambda item: (-item.importance, normalize_arxiv_id(item.arxiv_id)))
+    selected = [item for item in ranked if item.importance >= 4][:5]
+    return tuple(
+        f"{item.arxiv_id}：{_paper_label(item)}，重要性 {item.importance}/5，{item.importance_reason}"
+        for item in selected
     )
 
 
@@ -206,15 +275,29 @@ def _coerce_importance(value: object) -> int:
     return min(5, max(1, importance))
 
 
-def _fallback_paper_summary(paper: Paper) -> PaperSummary:
+def _fallback_paper_summary(paper: Paper, reason: str | None = None) -> PaperSummary:
     abstract = paper.abstract[:260] + ("..." if len(paper.abstract) > 260 else "")
     return PaperSummary(
         arxiv_id=paper.arxiv_id,
         chinese_title="",
         summary=abstract,
         importance=3,
-        importance_reason="AI 未提供结构化评级，暂按中等重要性展示。",
+        importance_reason=reason or "AI 未提供结构化评级，暂按中等重要性展示。",
     )
+
+
+def _paper_label(summary: PaperSummary) -> str:
+    return summary.chinese_title or summary.summary[:40]
+
+
+def _short_error(exc: BaseException) -> str:
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
+
+
+def _log(status: StatusLogger | None, message: str) -> None:
+    if status:
+        status(message)
 
 
 def _chat_completions_url(base_url: str) -> str:

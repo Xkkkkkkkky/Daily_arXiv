@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 import sys
 import time
-import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
@@ -13,6 +14,7 @@ from .config import ArxivConfig, ConfigError, TopicConfig
 
 
 TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
+StatusLogger = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -31,23 +33,84 @@ class Paper:
     comment: str = ""
 
 
+@dataclass(frozen=True)
+class TopicFetchStats:
+    name: str
+    query: str
+    processed_count: int
+    hit_max_results: bool
+
+
+@dataclass(frozen=True)
+class ArxivFetchStats:
+    topics: tuple[TopicFetchStats, ...]
+    max_results_per_topic: int
+    lookback_days: int
+    unique_paper_count: int
+
+
 def fetch_new_papers(config: ArxivConfig, now: datetime | None = None) -> list[Paper]:
+    papers, _ = fetch_new_papers_with_stats(config, now)
+    return papers
+
+
+def fetch_new_papers_with_stats(
+    config: ArxivConfig,
+    now: datetime | None = None,
+    status: StatusLogger | None = None,
+) -> tuple[list[Paper], ArxivFetchStats]:
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
     since = now_utc - timedelta(days=config.lookback_days)
     papers_by_id: dict[str, Paper] = {}
+    topic_stats: list[TopicFetchStats] = []
 
     for index, topic in enumerate(config.topics):
         if index > 0 and config.request_delay_seconds > 0:
+            _log(status, f"arXiv: waiting {config.request_delay_seconds:.1f}s before next topic request")
             time.sleep(config.request_delay_seconds)
 
-        for paper in _fetch_topic(topic, config, since):
+        _log(
+            status,
+            f"arXiv: requesting topic {index + 1}/{len(config.topics)} "
+            f"{topic.name} ({topic.query})",
+        )
+        topic_papers = _fetch_topic(topic, config, since)
+        hit_max_results = len(topic_papers) >= config.max_results_per_topic
+        _log(
+            status,
+            f"arXiv: topic {topic.name} returned {len(topic_papers)} paper(s) "
+            f"within the {config.lookback_days}-day window"
+            + ("; hit max_results_per_topic" if hit_max_results else ""),
+        )
+        topic_stats.append(
+            TopicFetchStats(
+                name=topic.name,
+                query=topic.query,
+                processed_count=len(topic_papers),
+                hit_max_results=hit_max_results,
+            )
+        )
+
+        for paper in topic_papers:
             existing = papers_by_id.get(paper.arxiv_id)
             if existing is None:
                 papers_by_id[paper.arxiv_id] = paper
             elif topic.name not in existing.topics:
                 papers_by_id[paper.arxiv_id] = replace(existing, topics=existing.topics + (topic.name,))
 
-    return sorted(papers_by_id.values(), key=lambda paper: paper.published, reverse=True)
+    papers = sorted(papers_by_id.values(), key=lambda paper: paper.published, reverse=True)
+    stats = ArxivFetchStats(
+        topics=tuple(topic_stats),
+        max_results_per_topic=config.max_results_per_topic,
+        lookback_days=config.lookback_days,
+        unique_paper_count=len(papers),
+    )
+    return papers, stats
+
+
+def _log(status: StatusLogger | None, message: str) -> None:
+    if status:
+        status(message)
 
 
 def _fetch_topic(topic: TopicConfig, config: ArxivConfig, since: datetime) -> list[Paper]:

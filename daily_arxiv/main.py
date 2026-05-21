@@ -8,8 +8,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .ai_client import DailySummary, build_fallback_summary, summarize_papers
-from .arxiv_client import Paper, fetch_new_papers, normalize_arxiv_id
-from .config import ConfigError, DigestConfig, load_config, validate_email_config
+from .arxiv_client import (
+    ArxivFetchStats,
+    Paper,
+    fetch_new_papers_with_stats,
+    normalize_arxiv_id,
+)
+from .config import ConfigError, DigestConfig, EmailConfig, load_config, validate_email_config
 from .emailer import send_email
 from .render import build_html_digest, build_subject, build_text_digest
 
@@ -22,14 +27,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        _status(f"Loading config from {args.config}")
         config = load_config(Path(args.config))
+        _status(
+            f"Config loaded: {len(config.arxiv.topics)} topic(s), "
+            f"lookback_days={config.arxiv.lookback_days}, "
+            f"max_results_per_topic={config.arxiv.max_results_per_topic}"
+        )
         if not args.no_email:
+            _status("Validating email configuration")
             validate_email_config(config.email)
 
         report_date = _local_date(config.arxiv.timezone)
+        _status(f"Report date resolved as {report_date.isoformat()} in {config.arxiv.timezone}")
         fetch_error = ""
+        fetch_stats: ArxivFetchStats | None = None
         try:
-            papers = fetch_new_papers(config.arxiv)
+            _status("Starting arXiv fetch")
+            papers, fetch_stats = fetch_new_papers_with_stats(config.arxiv, status=_status)
+            _status(f"arXiv fetch complete: {len(papers)} unique paper(s)")
         except Exception as exc:
             if not config.arxiv.allow_fetch_failure:
                 raise
@@ -38,30 +54,41 @@ def main(argv: list[str] | None = None) -> int:
             print(f"arXiv fetch failed; sending failure digest instead: {fetch_error}", file=sys.stderr)
 
         if fetch_error:
+            _status("Building arXiv failure digest")
             summary = _fetch_failure_summary(fetch_error, report_date)
         elif args.skip_ai:
+            _status("AI summarization skipped by --skip-ai")
             summary = build_fallback_summary(papers, report_date)
         else:
-            summary = summarize_papers(papers, config.ai, report_date)
+            summary = summarize_papers(papers, config.ai, report_date, status=_status)
 
+        _status("Applying display priority filter")
         display_papers, filter_note = _apply_priority_filter(papers, summary, config.digest)
         if filter_note:
             summary = replace(summary, overview=f"{summary.overview.strip()}\n\n{filter_note}")
 
+        _status(f"Rendering digest: {len(display_papers)} displayed paper(s)")
         subject = (
             f"{config.email.subject_prefix} - {report_date.isoformat()} - arXiv fetch failed"
             if fetch_error
             else build_subject(config.email.subject_prefix, report_date, len(display_papers))
         )
-        text_body = build_text_digest(summary, display_papers, report_date)
-        html_body = build_html_digest(summary, display_papers, report_date)
+        text_body = build_text_digest(summary, display_papers, report_date, fetch_stats, papers)
+        html_body = build_html_digest(summary, display_papers, report_date, fetch_stats, papers)
 
         if args.no_email:
+            _status("No-email mode enabled; printing text digest")
             print(text_body)
+            _status("Run complete")
             return 0
 
+        _status(
+            f"Sending email to {len(config.email.mail_to)} recipient(s) "
+            f"via {config.email.smtp_host}:{config.email.smtp_port} ({_smtp_mode(config.email)})"
+        )
         send_email(config.email, subject, text_body, html_body)
         print(f"Sent digest with {len(papers)} fetched papers and {len(display_papers)} displayed papers")
+        _status("Run complete")
         return 0
     except (ConfigError, ZoneInfoNotFoundError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
@@ -73,6 +100,18 @@ def main(argv: list[str] | None = None) -> int:
 
 def _local_date(timezone: str) -> date:
     return datetime.now(ZoneInfo(timezone)).date()
+
+
+def _status(message: str) -> None:
+    print(f"[daily-arxiv] {message}", file=sys.stderr, flush=True)
+
+
+def _smtp_mode(email_config: EmailConfig) -> str:
+    if email_config.smtp_use_ssl:
+        return "SSL"
+    if email_config.smtp_use_tls:
+        return "STARTTLS"
+    return "plain"
 
 
 def _apply_priority_filter(

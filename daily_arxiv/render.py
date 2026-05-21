@@ -4,7 +4,12 @@ import html
 from datetime import date
 
 from .ai_client import DailySummary, PaperSummary
-from .arxiv_client import Paper, normalize_arxiv_id
+from .arxiv_client import (
+    ArxivFetchStats,
+    Paper,
+    TopicFetchStats,
+    normalize_arxiv_id,
+)
 
 
 def build_subject(prefix: str, report_date: date, paper_count: int) -> str:
@@ -12,7 +17,13 @@ def build_subject(prefix: str, report_date: date, paper_count: int) -> str:
     return f"{prefix} - {report_date.isoformat()} - {paper_count} {suffix}"
 
 
-def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: date) -> str:
+def build_text_digest(
+    summary: DailySummary,
+    papers: list[Paper],
+    report_date: date,
+    fetch_stats: ArxivFetchStats | None = None,
+    all_papers: list[Paper] | None = None,
+) -> str:
     insights = _insights_by_id(summary)
     lines = [
         f"Daily arXiv Digest - {report_date.isoformat()}",
@@ -29,6 +40,9 @@ def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: d
 
     if not papers:
         lines.append("No new papers matched the configured topics.")
+        data_lines = _text_data_overview(summary, all_papers or papers, fetch_stats)
+        if data_lines:
+            lines.extend(["", *data_lines])
         return "\n".join(lines).strip() + "\n"
 
     lines.append("Papers:")
@@ -48,16 +62,26 @@ def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: d
                 f"   PDF: {paper.pdf_url or 'N/A'}",
             ]
         )
+    data_lines = _text_data_overview(summary, all_papers or papers, fetch_stats)
+    if data_lines:
+        lines.extend(["", *data_lines])
     return "\n".join(lines).strip() + "\n"
 
 
-def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: date) -> str:
+def build_html_digest(
+    summary: DailySummary,
+    papers: list[Paper],
+    report_date: date,
+    fetch_stats: ArxivFetchStats | None = None,
+    all_papers: list[Paper] | None = None,
+) -> str:
     insights = _insights_by_id(summary)
     paper_cards = "\n".join(_paper_card(index, paper, insights) for index, paper in enumerate(papers, start=1))
     if not paper_cards:
         paper_cards = _empty_state()
 
     shortlist = _shortlist_block(summary)
+    data_overview = _html_data_overview(summary, all_papers or papers, fetch_stats)
     preheader = f"Daily arXiv digest for {report_date.isoformat()} with {len(papers)} papers."
 
     return f"""<!doctype html>
@@ -89,6 +113,7 @@ def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: d
           <tr>
             <td style="background:#ffffff; padding:8px 30px 30px; border-left:1px solid #dbe3ef; border-right:1px solid #dbe3ef; border-bottom:1px solid #dbe3ef; border-radius:0 0 14px 14px;">
               {paper_cards}
+              {data_overview}
             </td>
           </tr>
           <tr>
@@ -158,6 +183,154 @@ def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> 
                   </td>
                 </tr>
               </table>"""
+
+
+def _html_data_overview(
+    summary: DailySummary,
+    papers: list[Paper],
+    fetch_stats: ArxivFetchStats | None,
+) -> str:
+    if fetch_stats is None:
+        return ""
+
+    insights = _insights_by_id(summary)
+    rows = "\n".join(_topic_data_row(topic, papers, insights) for topic in fetch_stats.topics)
+    return f"""
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #d8e2ef; border-radius:10px; margin:18px 0 0; background:#f8fbff;">
+                <tr>
+                  <td style="padding:14px 16px 12px;">
+                    <div style="font-size:14px; color:#16213e; font-weight:800; margin-bottom:4px;">数据概览</div>
+                    <div style="font-size:12px; line-height:1.55; color:#64748b; margin-bottom:10px;">
+                      请求 {len(fetch_stats.topics)} 个 topic · 近 {fetch_stats.lookback_days} 天处理窗口 · 去重后 {fetch_stats.unique_paper_count} 篇 · max_results_per_topic={fetch_stats.max_results_per_topic}
+                    </div>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                      <tr>
+                        <th align="left" style="padding:7px 6px; border-bottom:1px solid #dbe3ef; color:#475569; font-size:11px; font-weight:800;">Topic</th>
+                        <th align="center" style="padding:7px 6px; border-bottom:1px solid #dbe3ef; color:#475569; font-size:11px; font-weight:800;">处理</th>
+                        <th align="center" style="padding:7px 6px; border-bottom:1px solid #dbe3ef; color:#475569; font-size:11px; font-weight:800;">上限</th>
+                        <th align="left" style="padding:7px 6px; border-bottom:1px solid #dbe3ef; color:#475569; font-size:11px; font-weight:800;">评分分布</th>
+                      </tr>
+                      {rows}
+                    </table>
+                  </td>
+                </tr>
+              </table>"""
+
+
+def _topic_data_row(topic: TopicFetchStats, papers: list[Paper], insights: dict[str, PaperSummary]) -> str:
+    topic_name = topic.name
+    topic_papers = [paper for paper in papers if topic_name in paper.topics]
+    counts = _rating_counts(topic_papers, insights)
+    average = _average_rating(counts)
+    limit_badge = _limit_badge(topic.hit_max_results)
+    average_text = f"avg {average:.1f}" if average else "avg N/A"
+    return f"""
+                      <tr>
+                        <td style="padding:8px 6px; border-bottom:1px solid #e7edf5; vertical-align:top; width:42%;">
+                          <div style="font-size:12px; line-height:1.35; color:#1f2937; font-weight:800;">{html.escape(topic_name)}</div>
+                          <div style="font-size:11px; line-height:1.35; color:#64748b; margin-top:2px;">{html.escape(topic.query)}</div>
+                        </td>
+                        <td align="center" style="padding:8px 6px; border-bottom:1px solid #e7edf5; vertical-align:top; width:10%;">
+                          <span style="font-size:13px; color:#111827; font-weight:800;">{topic.processed_count}</span>
+                        </td>
+                        <td align="center" style="padding:8px 6px; border-bottom:1px solid #e7edf5; vertical-align:top; width:12%;">
+                          {limit_badge}
+                        </td>
+                        <td style="padding:8px 6px; border-bottom:1px solid #e7edf5; vertical-align:top; width:36%;">
+                          <div style="font-size:11px; color:#64748b; margin-bottom:4px;">{average_text} · {_rating_count_text(counts)}</div>
+                          {_rating_strip(counts)}
+                        </td>
+                      </tr>"""
+
+
+def _limit_badge(hit_max_results: bool) -> str:
+    if hit_max_results:
+        return (
+            '<span style="display:inline-block; padding:3px 7px; border-radius:999px; '
+            'background:#fef3c7; color:#92400e; font-size:11px; font-weight:800;">触顶</span>'
+        )
+    return (
+        '<span style="display:inline-block; padding:3px 7px; border-radius:999px; '
+        'background:#dcfce7; color:#166534; font-size:11px; font-weight:800;">未触顶</span>'
+    )
+
+
+def _rating_counts(papers: list[Paper], insights: dict[str, PaperSummary]) -> dict[int, int]:
+    counts = {rating: 0 for rating in range(1, 6)}
+    for paper in papers:
+        insight = insights.get(normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
+        importance = min(5, max(1, insight.importance))
+        counts[importance] += 1
+    return counts
+
+
+def _average_rating(counts: dict[int, int]) -> float:
+    total = sum(counts.values())
+    if not total:
+        return 0.0
+    return sum(rating * count for rating, count in counts.items()) / total
+
+
+def _rating_count_text(counts: dict[int, int]) -> str:
+    return " ".join(f"{rating}:{counts[rating]}" for rating in range(5, 0, -1))
+
+
+def _rating_strip(counts: dict[int, int]) -> str:
+    total = sum(counts.values())
+    if not total:
+        return '<div style="height:8px; border-radius:999px; background:#e5e7eb;"></div>'
+
+    colors = {
+        5: "#dc2626",
+        4: "#f59e0b",
+        3: "#0284c7",
+        2: "#64748b",
+        1: "#cbd5e1",
+    }
+    segments = []
+    for rating in range(5, 0, -1):
+        count = counts[rating]
+        if not count:
+            continue
+        width = count / total * 100
+        segments.append(
+            f'<span style="display:inline-block; height:8px; width:{width:.1f}%; '
+            f'background:{colors[rating]}; vertical-align:top;"></span>'
+        )
+    return (
+        '<div style="height:8px; overflow:hidden; border-radius:999px; background:#e5e7eb; '
+        f'white-space:nowrap;">{"".join(segments)}</div>'
+    )
+
+
+def _text_data_overview(
+    summary: DailySummary,
+    papers: list[Paper],
+    fetch_stats: ArxivFetchStats | None,
+) -> list[str]:
+    if fetch_stats is None:
+        return []
+
+    insights = _insights_by_id(summary)
+    lines = [
+        "Data overview:",
+        (
+            f"- Requested topics: {len(fetch_stats.topics)}; lookback: {fetch_stats.lookback_days} day(s); "
+            f"unique papers: {fetch_stats.unique_paper_count}; max_results_per_topic: "
+            f"{fetch_stats.max_results_per_topic}"
+        ),
+    ]
+    for topic in fetch_stats.topics:
+        topic_papers = [paper for paper in papers if topic.name in paper.topics]
+        counts = _rating_counts(topic_papers, insights)
+        average = _average_rating(counts)
+        average_text = f"{average:.1f}" if average else "N/A"
+        hit_limit = "yes" if topic.hit_max_results else "no"
+        lines.append(
+            f"- {topic.name} ({topic.query}): processed {topic.processed_count}, "
+            f"hit max {hit_limit}, avg {average_text}, ratings {_rating_count_text(counts)}"
+        )
+    return lines
 
 
 def _paragraph_block(text: str) -> str:

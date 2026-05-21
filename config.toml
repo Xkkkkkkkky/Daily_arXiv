@@ -1,5 +1,5 @@
 [arxiv]
-max_results_per_topic = 20
+max_results_per_topic = 50
 lookback_days = 2
 timezone = "Asia/Shanghai"
 sort_by = "submittedDate"
@@ -43,7 +43,7 @@ query = "cat:cs.PF"
 base_url = "https://api.deepseek.com"
 model = "deepseek-v4-pro"
 temperature = 0.2
-max_tokens = 70000
+max_tokens = 2000
 language = "Simplified Chinese"
 
 [digest]
