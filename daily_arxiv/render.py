@@ -19,6 +19,7 @@ class DigestDisplayStats:
     total_fetched: int
     displayed: int
     strategy: str
+    importance_filter: str = ""
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,8 @@ def build_html_digest(
         paper_cards = _empty_state()
 
     shortlist = _shortlist_block(summary)
-    data_overview = _html_data_overview(summary, source_papers, fetch_stats, topic_styles)
+    displayed_ids = {normalize_arxiv_id(paper.arxiv_id) for paper in papers}
+    data_overview = _html_data_overview(summary, source_papers, fetch_stats, topic_styles, displayed_ids)
     preheader = f"Daily arXiv digest for {report_date.isoformat()} with {len(papers)} papers."
 
     return f"""<!doctype html>
@@ -171,14 +173,20 @@ def build_html_digest(
 
 
 def _hero_stats(display_stats: DigestDisplayStats) -> str:
+    importance_filter = display_stats.importance_filter or "未筛选"
     return f"""
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px; max-width:620px; border-collapse:separate; border-spacing:0;">
                 <tr>
-                  <td width="50%" style="padding:9px 12px; background:#223159; border:1px solid #3b5285; border-radius:8px 0 0 0; color:#dbe7ff; font-size:12px; font-weight:700;">总抓取<br><span style="display:inline-block; margin-top:3px; color:#ffffff; font-size:18px; font-weight:800;">{display_stats.total_fetched} 篇</span></td>
-                  <td width="50%" style="padding:9px 12px; background:#223159; border-top:1px solid #3b5285; border-right:1px solid #3b5285; border-bottom:1px solid #3b5285; border-radius:0 8px 0 0; color:#dbe7ff; font-size:12px; font-weight:700;">最终展示<br><span style="display:inline-block; margin-top:3px; color:#ffffff; font-size:18px; font-weight:800;">{display_stats.displayed} 篇</span></td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="padding:9px 12px; background:#1d2b50; border-left:1px solid #3b5285; border-right:1px solid #3b5285; border-bottom:1px solid #3b5285; border-radius:0 0 8px 8px; color:#dbe7ff; font-size:13px; line-height:1.55;"><span style="color:#a8c7ff; font-weight:800;">筛选策略：</span>{html.escape(display_stats.strategy)}</td>
+                  <td width="50%" style="padding:9px 12px; background:#223159; border:1px solid #3b5285; border-radius:8px 0 0 8px; color:#dbe7ff; font-size:12px; font-weight:700;">文章数<br><span style="display:inline-block; margin-top:3px; color:#ffffff; font-size:18px; font-weight:800;">{display_stats.total_fetched} 篇</span></td>
+                  <td width="50%" style="padding:9px 12px; background:#223159; border-top:1px solid #3b5285; border-right:1px solid #3b5285; border-bottom:1px solid #3b5285; border-radius:0 8px 8px 0; color:#dbe7ff; font-size:12px; font-weight:700;">
+                    展示数
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:3px; border-collapse:collapse;">
+                      <tr>
+                        <td style="color:#ffffff; font-size:18px; font-weight:800;">{display_stats.displayed} 篇</td>
+                        <td align="right" valign="bottom" style="color:#a8c7ff; font-size:11px; font-weight:800; white-space:nowrap;">{html.escape(importance_filter)}</td>
+                      </tr>
+                    </table>
+                  </td>
                 </tr>
               </table>"""
 
@@ -291,6 +299,7 @@ def _html_data_overview(
     papers: list[Paper],
     fetch_stats: ArxivFetchStats | None,
     topic_styles: dict[str, TopicStyle],
+    displayed_ids: set[str],
 ) -> str:
     if fetch_stats is None:
         return ""
@@ -305,6 +314,7 @@ def _html_data_overview(
         )
         for index, topic in enumerate(fetch_stats.topics)
     )
+    all_ratings = _all_paper_rating_table(papers, insights, topic_styles, displayed_ids)
     return f"""
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #d8e2ef; border-radius:10px; margin:18px 0 0; background:#f8fbff;">
                 <tr>
@@ -322,9 +332,61 @@ def _html_data_overview(
                       </tr>
                       {rows}
                     </table>
+                    {all_ratings}
                   </td>
                 </tr>
               </table>"""
+
+
+def _all_paper_rating_table(
+    papers: list[Paper],
+    insights: dict[str, PaperSummary],
+    topic_styles: dict[str, TopicStyle],
+    displayed_ids: set[str],
+) -> str:
+    if not papers:
+        return ""
+    rows = "\n".join(
+        _paper_rating_row(paper, insights, topic_styles, displayed_ids)
+        for paper in papers
+    )
+    return f"""
+                    <div style="font-size:12px; color:#16213e; font-weight:800; margin:12px 0 6px;">全部文章评级</div>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                      {rows}
+                    </table>"""
+
+
+def _paper_rating_row(
+    paper: Paper,
+    insights: dict[str, PaperSummary],
+    topic_styles: dict[str, TopicStyle],
+    displayed_ids: set[str],
+) -> str:
+    normalized_id = normalize_arxiv_id(paper.arxiv_id)
+    insight = insights.get(normalized_id, _empty_insight(paper))
+    style = _paper_style(paper, topic_styles)
+    topic_text = ", ".join(paper.topics) or "N/A"
+    title = insight.chinese_title or paper.title
+    status = "展示" if normalized_id in displayed_ids else "未展示"
+    status_color = "#166534" if normalized_id in displayed_ids else "#64748b"
+    status_background = "#dcfce7" if normalized_id in displayed_ids else "#f1f5f9"
+    return f"""
+                      <tr style="background:{style.background};">
+                        <td width="16%" style="padding:5px 6px 5px 8px; border-left:4px solid {style.accent}; border-bottom:1px solid {style.border}; vertical-align:top;">
+                          <a href="{html.escape(paper.link)}" style="font-size:10px; line-height:1.3; color:{style.text}; font-weight:800; text-decoration:none;">{html.escape(paper.arxiv_id)}</a>
+                        </td>
+                        <td width="55%" style="padding:5px 6px; border-bottom:1px solid {style.border}; vertical-align:top;">
+                          <div style="font-size:10px; line-height:1.35; color:#1f2937; font-weight:700;">{html.escape(title)}</div>
+                          <div style="font-size:9px; line-height:1.3; color:#64748b; margin-top:2px;">{html.escape(topic_text)}</div>
+                        </td>
+                        <td width="13%" align="center" style="padding:5px 6px; border-bottom:1px solid {style.border}; vertical-align:top;">
+                          <span style="display:inline-block; min-width:32px; padding:2px 5px; border-radius:999px; background:#ffffff; border:1px solid {style.border}; color:#111827; font-size:10px; font-weight:800;">{insight.importance}/5</span>
+                        </td>
+                        <td width="16%" align="right" style="padding:5px 6px; border-bottom:1px solid {style.border}; vertical-align:top;">
+                          <span style="display:inline-block; padding:2px 5px; border-radius:999px; background:{status_background}; color:{status_color}; font-size:9px; font-weight:800;">{status}</span>
+                        </td>
+                      </tr>"""
 
 
 def _topic_data_row(

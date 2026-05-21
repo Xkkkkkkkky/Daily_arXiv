@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             total_fetched=len(papers),
             displayed=len(display_papers),
             strategy=filter_strategy,
+            importance_filter=_importance_filter_label(config.digest),
         )
 
         _status(f"Rendering digest: {len(display_papers)} displayed paper(s)")
@@ -155,6 +156,12 @@ def _apply_priority_filter(
         strategy += f"，最多展示 {config.priority_filter_max_papers} 篇"
 
     return selected, f"已触发筛选：总抓取量超过 {config.priority_filter_min_total} 篇，{strategy}。"
+
+
+def _importance_filter_label(config: DigestConfig) -> str:
+    if not config.priority_filter_enabled:
+        return "未筛选"
+    return f"重要性 ≥ {config.priority_filter_min_importance}/5"
 
 
 def _fetch_failure_summary(error: str, report_date: date) -> DailySummary:
