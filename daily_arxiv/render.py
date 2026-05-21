@@ -370,8 +370,8 @@ def _paper_rating_item(
                           <span style="display:inline-block; margin-left:6px; padding:1px 5px; border-radius:999px; background:#ffffff; border:1px solid {style.border}; color:#111827; font-size:10px; font-weight:800;">{insight.importance}/5</span>
                           <span style="display:inline-block; margin-left:6px; color:#64748b; font-size:9px; font-weight:700;">{html.escape(topic_text)}</span>
                         </div>
-                        <div style="font-size:10px; line-height:1.3; color:#1f2937; font-weight:700; margin-top:3px;">原文：{html.escape(paper.title)}</div>
-                        <div style="font-size:10px; line-height:1.3; color:#475569; margin-top:2px;">译名：{html.escape(chinese_title)}</div>
+                        <div style="font-size:10px; line-height:1.3; color:#1f2937; font-weight:700; margin-top:3px;">{html.escape(paper.title)}</div>
+                        <div style="font-size:10px; line-height:1.3; color:#475569; margin-top:2px;">{html.escape(chinese_title)}</div>
                       </div>"""
 
 
