@@ -1,5 +1,5 @@
 [arxiv]
-max_results_per_topic = 10
+max_results_per_topic = 5
 lookback_days = 2
 timezone = "Asia/Shanghai"
 sort_by = "submittedDate"
@@ -12,16 +12,8 @@ allow_fetch_failure = true
 
 # Add any number of top-level [[topics]] blocks.
 [[topics]]
-name = "Astrophysics - Cosmology"
-query = "cat:astro-ph.CO"
-
-[[topics]]
-name = "Astrophysics - Galaxy"
-query = "cat:astro-ph.GA"
-
-[[topics]]
-name = "Astrophysics - High Energy"
-query = "cat:astro-ph.HE"
+name = "Performance - Computer Science"
+query = "cat:cs.PF"
 
 
 [ai]
