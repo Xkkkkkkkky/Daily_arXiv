@@ -122,8 +122,7 @@ def build_html_digest(
         paper_cards = _empty_state()
 
     shortlist = _shortlist_block(summary)
-    displayed_ids = {normalize_arxiv_id(paper.arxiv_id) for paper in papers}
-    data_overview = _html_data_overview(summary, source_papers, fetch_stats, topic_styles, displayed_ids)
+    data_overview = _html_data_overview(summary, source_papers, fetch_stats, topic_styles)
     preheader = f"Daily arXiv digest for {report_date.isoformat()} with {len(papers)} papers."
 
     return f"""<!doctype html>
@@ -298,7 +297,6 @@ def _html_data_overview(
     papers: list[Paper],
     fetch_stats: ArxivFetchStats | None,
     topic_styles: dict[str, TopicStyle],
-    displayed_ids: set[str],
 ) -> str:
     if fetch_stats is None:
         return ""
@@ -313,7 +311,7 @@ def _html_data_overview(
         )
         for index, topic in enumerate(fetch_stats.topics)
     )
-    all_ratings = _all_paper_rating_table(papers, insights, topic_styles, displayed_ids)
+    all_ratings = _all_paper_rating_list(papers, insights, topic_styles)
     return f"""
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #d8e2ef; border-radius:10px; margin:18px 0 0; background:#f8fbff;">
                 <tr>
@@ -337,55 +335,44 @@ def _html_data_overview(
               </table>"""
 
 
-def _all_paper_rating_table(
+def _all_paper_rating_list(
     papers: list[Paper],
     insights: dict[str, PaperSummary],
     topic_styles: dict[str, TopicStyle],
-    displayed_ids: set[str],
 ) -> str:
     if not papers:
         return ""
-    rows = "\n".join(
-        _paper_rating_row(paper, insights, topic_styles, displayed_ids)
+    items = "\n".join(
+        _paper_rating_item(paper, insights, topic_styles)
         for paper in papers
     )
     return f"""
-                    <div style="font-size:12px; color:#16213e; font-weight:800; margin:12px 0 6px;">全部文章评级</div>
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-                      {rows}
-                    </table>"""
+                    <div style="margin:13px 0 0; padding-top:10px; border-top:1px dashed #cbd5e1;">
+                      <div style="font-size:12px; color:#16213e; font-weight:800; margin:0 0 6px;">全部文章评级</div>
+                      {items}
+                    </div>"""
 
 
-def _paper_rating_row(
+def _paper_rating_item(
     paper: Paper,
     insights: dict[str, PaperSummary],
     topic_styles: dict[str, TopicStyle],
-    displayed_ids: set[str],
 ) -> str:
     normalized_id = normalize_arxiv_id(paper.arxiv_id)
     insight = insights.get(normalized_id, _empty_insight(paper))
     style = _paper_style(paper, topic_styles)
     topic_text = ", ".join(paper.topics) or "N/A"
-    title = insight.chinese_title or paper.title
-    status = "展示" if normalized_id in displayed_ids else "未展示"
-    status_color = "#166534" if normalized_id in displayed_ids else "#64748b"
-    status_background = "#dcfce7" if normalized_id in displayed_ids else "#f1f5f9"
+    chinese_title = insight.chinese_title or "译名暂缺"
     return f"""
-                      <tr style="background:{style.background};">
-                        <td width="16%" style="padding:5px 6px 5px 8px; border-left:4px solid {style.accent}; border-bottom:1px solid {style.border}; vertical-align:top;">
-                          <a href="{html.escape(paper.link)}" style="font-size:10px; line-height:1.3; color:{style.text}; font-weight:800; text-decoration:none;">{html.escape(paper.arxiv_id)}</a>
-                        </td>
-                        <td width="55%" style="padding:5px 6px; border-bottom:1px solid {style.border}; vertical-align:top;">
-                          <div style="font-size:10px; line-height:1.35; color:#1f2937; font-weight:700;">{html.escape(title)}</div>
-                          <div style="font-size:9px; line-height:1.3; color:#64748b; margin-top:2px;">{html.escape(topic_text)}</div>
-                        </td>
-                        <td width="13%" align="center" style="padding:5px 6px; border-bottom:1px solid {style.border}; vertical-align:top;">
-                          <span style="display:inline-block; min-width:32px; padding:2px 5px; border-radius:999px; background:#ffffff; border:1px solid {style.border}; color:#111827; font-size:10px; font-weight:800;">{insight.importance}/5</span>
-                        </td>
-                        <td width="16%" align="right" style="padding:5px 6px; border-bottom:1px solid {style.border}; vertical-align:top;">
-                          <span style="display:inline-block; padding:2px 5px; border-radius:999px; background:{status_background}; color:{status_color}; font-size:9px; font-weight:800;">{status}</span>
-                        </td>
-                      </tr>"""
+                      <div style="margin:0 0 5px; padding:6px 7px 6px 9px; background:{style.background}; border:1px solid {style.border}; border-left:4px solid {style.accent}; border-radius:6px;">
+                        <div style="font-size:10px; line-height:1.25; color:{style.text}; font-weight:800;">
+                          <a href="{html.escape(paper.link)}" style="color:{style.text}; text-decoration:none;">{html.escape(paper.arxiv_id)}</a>
+                          <span style="display:inline-block; margin-left:6px; padding:1px 5px; border-radius:999px; background:#ffffff; border:1px solid {style.border}; color:#111827; font-size:10px; font-weight:800;">{insight.importance}/5</span>
+                          <span style="display:inline-block; margin-left:6px; color:#64748b; font-size:9px; font-weight:700;">{html.escape(topic_text)}</span>
+                        </div>
+                        <div style="font-size:10px; line-height:1.3; color:#1f2937; font-weight:700; margin-top:3px;">原文：{html.escape(paper.title)}</div>
+                        <div style="font-size:10px; line-height:1.3; color:#475569; margin-top:2px;">译名：{html.escape(chinese_title)}</div>
+                      </div>"""
 
 
 def _topic_data_row(
