@@ -69,6 +69,7 @@ model = "gpt-4o-mini"
 temperature = 0.2
 max_tokens = 4000
 language = "Simplified Chinese"
+concurrency = 10
 
 [digest]
 priority_filter_enabled = true
@@ -105,6 +106,7 @@ Use environment variables locally or GitHub Actions Secrets in CI.
 | `AI_API_KEY` | AI API key |
 | `AI_BASE_URL` | OpenAI-compatible base URL |
 | `AI_MODEL` | Model override |
+| `AI_CONCURRENCY` | Concurrent AI request window |
 | `SMTP_HOST` | SMTP host |
 | `SMTP_PORT` | SMTP port |
 | `SMTP_USER` | SMTP username |

@@ -59,6 +59,9 @@ max_tokens = 4000
 # Output language instruction sent to the AI.
 language = "Simplified Chinese"
 
+# Maximum concurrent AI requests.
+concurrency = 10
+
 [digest]
 # Enable final email display filtering by AI importance rating.
 priority_filter_enabled = true

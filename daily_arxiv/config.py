@@ -41,6 +41,7 @@ class AIConfig:
     max_tokens: int = 3000
     language: str = "Simplified Chinese"
     timeout_seconds: int = 120
+    concurrency: int = 10
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,7 @@ def _load_ai_config(ai_data: dict[str, Any]) -> AIConfig:
         max_tokens=_int(_env("AI_MAX_TOKENS") or ai_data.get("max_tokens", 3000), "ai.max_tokens"),
         language=_env("AI_LANGUAGE") or str(ai_data.get("language", "Simplified Chinese")).strip(),
         timeout_seconds=_int(_env("AI_TIMEOUT_SECONDS") or ai_data.get("timeout_seconds", 120), "ai.timeout_seconds"),
+        concurrency=_int(_env("AI_CONCURRENCY") or ai_data.get("concurrency", 10), "ai.concurrency"),
     )
     if config.temperature < 0:
         raise ConfigError("ai.temperature must be >= 0")
@@ -184,6 +186,8 @@ def _load_ai_config(ai_data: dict[str, Any]) -> AIConfig:
         raise ConfigError("ai.max_tokens must be > 0")
     if config.timeout_seconds <= 0:
         raise ConfigError("ai.timeout_seconds must be > 0")
+    if config.concurrency <= 0:
+        raise ConfigError("ai.concurrency must be > 0")
     return config
 
 

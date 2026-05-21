@@ -4,6 +4,7 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 
@@ -31,6 +32,15 @@ class DailySummary:
     raw_text: str = ""
 
 
+@dataclass(frozen=True)
+class _PaperSummaryResult:
+    index: int
+    summary: PaperSummary
+    raw_response: str
+    used_fallback: bool
+    message: str
+
+
 def summarize_papers(
     papers: list[Paper],
     config: AIConfig,
@@ -42,41 +52,59 @@ def summarize_papers(
     if not config.api_key:
         raise ConfigError("Missing AI_API_KEY or ai.api_key")
 
-    summaries: list[PaperSummary] = []
-    raw_responses: list[str] = []
-    fallback_count = 0
     total_count = len(papers)
-    _log(status, f"AI: starting per-paper summarization for {total_count} paper(s)")
+    summaries: list[PaperSummary | None] = [None] * total_count
+    raw_responses: list[str] = [""] * total_count
+    fallback_count = 0
+    worker_count = min(config.concurrency, total_count)
+    _log(
+        status,
+        f"AI: starting per-paper summarization for {total_count} paper(s) "
+        f"with concurrency window {worker_count}",
+    )
 
-    for index, paper in enumerate(papers, start=1):
-        _log(status, f"AI: requesting summary {index}/{total_count} for {paper.arxiv_id}")
-        try:
-            content = _request_paper_summary(paper, config, report_date, index, total_count)
-            raw_responses.append(f"{paper.arxiv_id}\n{content}")
-            paper_summary = _parse_paper_summary(content, paper)
-            if paper_summary is None:
-                fallback_count += 1
-                _log(status, f"AI: response for {paper.arxiv_id} was not valid JSON; using fallback card")
-                paper_summary = _fallback_paper_summary(
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {}
+        for index, paper in enumerate(papers, start=1):
+            _log(status, f"AI: submitting summary {index}/{total_count} for {paper.arxiv_id}")
+            future = executor.submit(_summarize_one_paper, paper, config, report_date, index, total_count)
+            futures[future] = (index, paper)
+
+        for future in as_completed(futures):
+            index, paper = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                result = _fallback_result(
                     paper,
-                    "AI 未返回可解析的结构化结果，暂按摘要内容与中等重要性展示。",
+                    index,
+                    f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
+                    f"request failed: {_short_error(exc)}",
+                )
+
+            summaries[result.index - 1] = result.summary
+            raw_responses[result.index - 1] = result.raw_response
+            if result.used_fallback:
+                fallback_count += 1
+                _log(
+                    status,
+                    f"AI: summary {result.index}/{total_count} for {paper.arxiv_id} "
+                    f"used fallback: {result.message}",
                 )
             else:
-                _log(status, f"AI: parsed {paper.arxiv_id} with importance {paper_summary.importance}/5")
-        except Exception as exc:
-            fallback_count += 1
-            _log(status, f"AI: request for {paper.arxiv_id} failed: {_short_error(exc)}; using fallback card")
-            paper_summary = _fallback_paper_summary(
-                paper,
-                f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
-            )
-        summaries.append(paper_summary)
+                _log(
+                    status,
+                    f"AI: parsed summary {result.index}/{total_count} for {paper.arxiv_id} "
+                    f"with importance {result.summary.importance}/5",
+                )
+
+    final_summaries = tuple(summary for summary in summaries if summary is not None)
 
     return DailySummary(
-        overview=_build_overview(summaries, report_date, fallback_count),
-        paper_summaries=tuple(summaries),
-        shortlist=_build_shortlist(summaries),
-        raw_text="\n\n".join(raw_responses),
+        overview=_build_overview(list(final_summaries), report_date, fallback_count),
+        paper_summaries=final_summaries,
+        shortlist=_build_shortlist(list(final_summaries)),
+        raw_text="\n\n".join(item for item in raw_responses if item),
     )
 
 
@@ -87,6 +115,58 @@ def build_fallback_summary(papers: list[Paper], report_date: date) -> DailySumma
     return DailySummary(
         overview=f"AI summarization was skipped for {report_date.isoformat()}. Below are abstract-based previews.",
         paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
+    )
+
+
+def _summarize_one_paper(
+    paper: Paper,
+    config: AIConfig,
+    report_date: date,
+    index: int,
+    total_count: int,
+) -> _PaperSummaryResult:
+    try:
+        content = _request_paper_summary(paper, config, report_date, index, total_count)
+    except Exception as exc:
+        return _fallback_result(
+            paper,
+            index,
+            f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
+            f"request failed: {_short_error(exc)}",
+        )
+
+    paper_summary = _parse_paper_summary(content, paper)
+    raw_response = f"{paper.arxiv_id}\n{content}"
+    if paper_summary is None:
+        return _fallback_result(
+            paper,
+            index,
+            "AI 未返回可解析的结构化结果，暂按摘要内容与中等重要性展示。",
+            "response was not valid structured JSON",
+            raw_response,
+        )
+    return _PaperSummaryResult(
+        index=index,
+        summary=paper_summary,
+        raw_response=raw_response,
+        used_fallback=False,
+        message="",
+    )
+
+
+def _fallback_result(
+    paper: Paper,
+    index: int,
+    reason: str,
+    message: str,
+    raw_response: str = "",
+) -> _PaperSummaryResult:
+    return _PaperSummaryResult(
+        index=index,
+        summary=_fallback_paper_summary(paper, reason),
+        raw_response=raw_response,
+        used_fallback=True,
+        message=message,
     )
 
 
