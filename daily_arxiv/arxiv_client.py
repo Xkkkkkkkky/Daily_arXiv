@@ -39,6 +39,7 @@ class TopicFetchStats:
     query: str
     processed_count: int
     hit_max_results: bool
+    error: str = ""
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ def fetch_new_papers_with_stats(
     since = now_utc - timedelta(days=config.lookback_days)
     papers_by_id: dict[str, Paper] = {}
     topic_stats: list[TopicFetchStats] = []
+    failed_topics: list[str] = []
 
     for index, topic in enumerate(config.topics):
         if index > 0 and config.request_delay_seconds > 0:
@@ -74,7 +76,25 @@ def fetch_new_papers_with_stats(
             f"arXiv: requesting topic {index + 1}/{len(config.topics)} "
             f"{topic.name} ({topic.query})",
         )
-        topic_papers = _fetch_topic(topic, config, since)
+        try:
+            topic_papers = _fetch_topic(topic, config, since)
+        except ConfigError:
+            raise
+        except Exception as exc:
+            error = _short_error(exc)
+            failed_topics.append(f"{topic.name}: {error}")
+            _log(status, f"arXiv: topic {topic.name} failed after retries: {error}; continuing")
+            topic_stats.append(
+                TopicFetchStats(
+                    name=topic.name,
+                    query=topic.query,
+                    processed_count=0,
+                    hit_max_results=False,
+                    error=error,
+                )
+            )
+            continue
+
         hit_max_results = len(topic_papers) >= config.max_results_per_topic
         _log(
             status,
@@ -98,6 +118,11 @@ def fetch_new_papers_with_stats(
             elif topic.name not in existing.topics:
                 papers_by_id[paper.arxiv_id] = replace(existing, topics=existing.topics + (topic.name,))
 
+    if failed_topics and len(failed_topics) == len(config.topics):
+        raise RuntimeError("All arXiv topic requests failed: " + "; ".join(failed_topics))
+    if failed_topics:
+        _log(status, f"arXiv: {len(failed_topics)} topic request(s) failed but remaining topics were processed")
+
     papers = sorted(papers_by_id.values(), key=lambda paper: paper.published, reverse=True)
     stats = ArxivFetchStats(
         topics=tuple(topic_stats),
@@ -111,6 +136,11 @@ def fetch_new_papers_with_stats(
 def _log(status: StatusLogger | None, message: str) -> None:
     if status:
         status(message)
+
+
+def _short_error(exc: BaseException) -> str:
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
 
 
 def _fetch_topic(topic: TopicConfig, config: ArxivConfig, since: datetime) -> list[Paper]:

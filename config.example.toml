@@ -23,8 +23,8 @@ timeout_seconds = 90
 # Number of retries after transient arXiv failures.
 retry_count = 2
 
-# Linear retry backoff in seconds: 60, 120, ...
-retry_backoff_seconds = 60.0
+# Linear retry backoff in seconds: 10, 20, ...
+retry_backoff_seconds = 10.0
 
 # If true, send a failure digest when arXiv fetch fails instead of failing the whole run.
 allow_fetch_failure = true

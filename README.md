@@ -56,7 +56,7 @@ sort_order = "descending"
 request_delay_seconds = 10.0
 timeout_seconds = 90
 retry_count = 2
-retry_backoff_seconds = 60.0
+retry_backoff_seconds = 10.0
 allow_fetch_failure = true
 
 [[topics]]

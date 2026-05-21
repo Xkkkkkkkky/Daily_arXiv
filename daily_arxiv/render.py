@@ -222,13 +222,19 @@ def _topic_data_row(topic: TopicFetchStats, papers: list[Paper], insights: dict[
     topic_papers = [paper for paper in papers if topic_name in paper.topics]
     counts = _rating_counts(topic_papers, insights)
     average = _average_rating(counts)
-    limit_badge = _limit_badge(topic.hit_max_results)
+    limit_badge = _topic_status_badge(topic)
     average_text = f"avg {average:.1f}" if average else "avg N/A"
+    error_line = (
+        f'<div style="font-size:11px; line-height:1.35; color:#b91c1c; margin-top:3px;">{html.escape(topic.error)}</div>'
+        if topic.error
+        else ""
+    )
     return f"""
                       <tr>
                         <td style="padding:8px 6px; border-bottom:1px solid #e7edf5; vertical-align:top; width:42%;">
                           <div style="font-size:12px; line-height:1.35; color:#1f2937; font-weight:800;">{html.escape(topic_name)}</div>
                           <div style="font-size:11px; line-height:1.35; color:#64748b; margin-top:2px;">{html.escape(topic.query)}</div>
+                          {error_line}
                         </td>
                         <td align="center" style="padding:8px 6px; border-bottom:1px solid #e7edf5; vertical-align:top; width:10%;">
                           <span style="font-size:13px; color:#111827; font-weight:800;">{topic.processed_count}</span>
@@ -243,8 +249,13 @@ def _topic_data_row(topic: TopicFetchStats, papers: list[Paper], insights: dict[
                       </tr>"""
 
 
-def _limit_badge(hit_max_results: bool) -> str:
-    if hit_max_results:
+def _topic_status_badge(topic: TopicFetchStats) -> str:
+    if topic.error:
+        return (
+            '<span style="display:inline-block; padding:3px 7px; border-radius:999px; '
+            'background:#fee2e2; color:#991b1b; font-size:11px; font-weight:800;">失败</span>'
+        )
+    if topic.hit_max_results:
         return (
             '<span style="display:inline-block; padding:3px 7px; border-radius:999px; '
             'background:#fef3c7; color:#92400e; font-size:11px; font-weight:800;">触顶</span>'
@@ -325,12 +336,18 @@ def _text_data_overview(
         counts = _rating_counts(topic_papers, insights)
         average = _average_rating(counts)
         average_text = f"{average:.1f}" if average else "N/A"
-        hit_limit = "yes" if topic.hit_max_results else "no"
+        hit_limit = _text_topic_status(topic)
         lines.append(
             f"- {topic.name} ({topic.query}): processed {topic.processed_count}, "
-            f"hit max {hit_limit}, avg {average_text}, ratings {_rating_count_text(counts)}"
+            f"status {hit_limit}, avg {average_text}, ratings {_rating_count_text(counts)}"
         )
     return lines
+
+
+def _text_topic_status(topic: TopicFetchStats) -> str:
+    if topic.error:
+        return f"failed ({topic.error})"
+    return "hit max yes" if topic.hit_max_results else "hit max no"
 
 
 def _paragraph_block(text: str) -> str:
