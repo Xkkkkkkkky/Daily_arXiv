@@ -148,7 +148,6 @@ def build_html_digest(
           </tr>
           <tr>
             <td style="background:#ffffff; padding:24px 30px 8px; border-left:1px solid #dbe3ef; border-right:1px solid #dbe3ef;">
-              <div style="font-size:14px; color:#16213e; font-weight:800; margin:0 0 8px;">今日总览</div>
               {_paragraph_block(summary.overview)}
               {shortlist}
             </td>
