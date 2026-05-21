@@ -78,12 +78,11 @@ def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: d
             <td style="background:#16213e; color:#ffffff; padding:28px 30px; border-radius:14px 14px 0 0;">
               <div style="font-size:12px; letter-spacing:0; text-transform:uppercase; color:#a8c7ff; font-weight:700;">Daily arXiv</div>
               <h1 style="margin:8px 0 8px; font-size:28px; line-height:1.25; font-weight:800;">{html.escape(report_date.isoformat())} 论文速览</h1>
-              <div style="font-size:15px; color:#dbe7ff;">{len(papers)} 篇论文 · AI 中文摘要 · 重要性评级</div>
+              <div style="font-size:15px; color:#dbe7ff;">{len(papers)} 篇论文</div>
             </td>
           </tr>
           <tr>
             <td style="background:#ffffff; padding:24px 30px 8px; border-left:1px solid #dbe3ef; border-right:1px solid #dbe3ef;">
-              <h2 style="margin:0 0 10px; font-size:18px; line-height:1.35; color:#111827;">今日总览</h2>
               {_paragraph_block(summary.overview)}
               {shortlist}
             </td>
@@ -143,7 +142,7 @@ def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> 
                       </div>
                     </div>
                     <div style="margin:14px 0 0; padding:14px 16px; background:#ffffff; border-left:4px solid #0b63ce; border-radius:8px;">
-                      <div style="font-size:13px; color:#374151; font-weight:800; margin-bottom:6px;">中文摘要</div>
+                      <div style="font-size:13px; color:#374151; font-weight:800; margin-bottom:6px;">摘要</div>
                       <div style="font-size:15px; line-height:1.72; color:#1f2937;">{html.escape(insight.summary)}</div>
                     </div>
                     <div style="margin:12px 0 0; padding:12px 14px; background:#fff8eb; border:1px solid #f4d59e; border-radius:8px;">
