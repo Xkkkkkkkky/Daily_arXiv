@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-import re
 from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .ai_client import DailySummary, build_fallback_summary, summarize_papers
-from .arxiv_client import Paper, fetch_new_papers
+from .arxiv_client import Paper, fetch_new_papers, normalize_arxiv_id
 from .config import ConfigError, DigestConfig, load_config, validate_email_config
 from .emailer import send_email
 from .render import build_html_digest, build_subject, build_text_digest
@@ -62,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         send_email(config.email, subject, text_body, html_body)
-        print(f"Sent digest with {len(papers)} papers to {', '.join(config.email.mail_to)}")
+        print(f"Sent digest with {len(papers)} fetched papers and {len(display_papers)} displayed papers")
         return 0
     except (ConfigError, ZoneInfoNotFoundError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
@@ -85,21 +84,21 @@ def _apply_priority_filter(
         return papers, ""
 
     importance_by_id = {
-        _normalize_arxiv_id(item.arxiv_id): item.importance
+        normalize_arxiv_id(item.arxiv_id): item.importance
         for item in summary.paper_summaries
     }
 
     ranked = sorted(
         papers,
         key=lambda paper: (
-            -importance_by_id.get(_normalize_arxiv_id(paper.arxiv_id), 0),
+            -importance_by_id.get(normalize_arxiv_id(paper.arxiv_id), 0),
             -paper.published.timestamp(),
         ),
     )
     selected = [
         paper
         for paper in ranked
-        if importance_by_id.get(_normalize_arxiv_id(paper.arxiv_id), 0) >= config.priority_filter_min_importance
+        if importance_by_id.get(normalize_arxiv_id(paper.arxiv_id), 0) >= config.priority_filter_min_importance
     ]
 
     if not selected:
@@ -120,11 +119,6 @@ def _apply_priority_filter(
         f"最终展示 {len(selected)} 篇。"
     )
     return selected, note
-
-
-def _normalize_arxiv_id(value: str) -> str:
-    arxiv_id = value.strip().rsplit("/", 1)[-1]
-    return re.sub(r"v\d+$", "", arxiv_id)
 
 
 def _fetch_failure_summary(error: str, report_date: date) -> DailySummary:

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import date
 
-from .arxiv_client import Paper
+from .arxiv_client import Paper, normalize_arxiv_id
 from .config import AIConfig, ConfigError
 
 
@@ -68,13 +67,12 @@ def summarize_papers(papers: list[Paper], config: AIConfig, report_date: date) -
         with urllib.request.urlopen(request, timeout=config.timeout_seconds) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"AI service returned HTTP {exc.code}: {detail}") from exc
+        raise RuntimeError(f"AI service returned HTTP {exc.code}") from exc
 
     try:
         content = data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"Unexpected AI response shape: {data}") from exc
+        raise RuntimeError("Unexpected AI response shape") from exc
 
     return _parse_digest(content, papers)
 
@@ -162,7 +160,7 @@ def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
             importance=_coerce_importance(item.get("importance", 3)),
             importance_reason=str(item.get("importance_reason", "")).strip(),
         )
-        summaries_by_id[_normalize_arxiv_id(arxiv_id)] = paper_summary
+        summaries_by_id[normalize_arxiv_id(arxiv_id)] = paper_summary
 
     shortlist = []
     for item in data.get("shortlist", []):
@@ -173,7 +171,7 @@ def _parse_digest(content: str, papers: list[Paper]) -> DailySummary:
     return DailySummary(
         overview=str(data.get("overview", "")).strip() or "AI did not provide an overview.",
         paper_summaries=tuple(
-            summaries_by_id.get(_normalize_arxiv_id(paper.arxiv_id), _fallback_paper_summary(paper))
+            summaries_by_id.get(normalize_arxiv_id(paper.arxiv_id), _fallback_paper_summary(paper))
             for paper in papers
         ),
         shortlist=tuple(shortlist[:5]),
@@ -198,11 +196,6 @@ def _extract_json_object(content: str) -> str:
     if start >= 0 and end > start:
         return stripped[start : end + 1]
     return stripped
-
-
-def _normalize_arxiv_id(value: str) -> str:
-    arxiv_id = value.strip().rsplit("/", 1)[-1]
-    return re.sub(r"v\d+$", "", arxiv_id)
 
 
 def _coerce_importance(value: object) -> int:

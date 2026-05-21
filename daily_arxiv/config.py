@@ -95,10 +95,14 @@ def validate_email_config(config: EmailConfig) -> None:
         missing.append("MAIL_FROM or email.from")
     if not config.mail_to:
         missing.append("MAIL_TO or email.to")
+    if config.smtp_password and not config.smtp_user:
+        missing.append("SMTP_USER or email.smtp_user")
     if config.smtp_user and not config.smtp_password:
         missing.append("SMTP_PASSWORD or email.smtp_password")
     if missing:
         raise ConfigError("Missing email configuration: " + ", ".join(missing))
+    if config.smtp_use_tls and config.smtp_use_ssl:
+        raise ConfigError("email.smtp_use_tls and email.smtp_use_ssl cannot both be true")
 
 
 def _load_arxiv_config(data: dict[str, Any]) -> ArxivConfig:
@@ -107,7 +111,7 @@ def _load_arxiv_config(data: dict[str, Any]) -> ArxivConfig:
     if not topics:
         raise ConfigError("Add at least one [[topics]] entry or arxiv.query")
 
-    return ArxivConfig(
+    config = ArxivConfig(
         topics=topics,
         max_results_per_topic=_int(arxiv_data.get("max_results_per_topic", 25), "arxiv.max_results_per_topic"),
         lookback_days=_int(arxiv_data.get("lookback_days", 1), "arxiv.lookback_days"),
@@ -120,6 +124,19 @@ def _load_arxiv_config(data: dict[str, Any]) -> ArxivConfig:
         retry_backoff_seconds=_float(arxiv_data.get("retry_backoff_seconds", 10.0), "arxiv.retry_backoff_seconds"),
         allow_fetch_failure=_bool(arxiv_data.get("allow_fetch_failure", True), "arxiv.allow_fetch_failure"),
     )
+    if config.max_results_per_topic <= 0:
+        raise ConfigError("arxiv.max_results_per_topic must be > 0")
+    if config.lookback_days <= 0:
+        raise ConfigError("arxiv.lookback_days must be > 0")
+    if config.request_delay_seconds < 0:
+        raise ConfigError("arxiv.request_delay_seconds must be >= 0")
+    if config.timeout_seconds <= 0:
+        raise ConfigError("arxiv.timeout_seconds must be > 0")
+    if config.retry_count < 0:
+        raise ConfigError("arxiv.retry_count must be >= 0")
+    if config.retry_backoff_seconds < 0:
+        raise ConfigError("arxiv.retry_backoff_seconds must be >= 0")
+    return config
 
 
 def _load_topics(data: dict[str, Any], arxiv_data: dict[str, Any]) -> tuple[TopicConfig, ...]:
@@ -141,7 +158,7 @@ def _load_topics(data: dict[str, Any], arxiv_data: dict[str, Any]) -> tuple[Topi
 
 
 def _load_ai_config(ai_data: dict[str, Any]) -> AIConfig:
-    return AIConfig(
+    config = AIConfig(
         api_key=_env("AI_API_KEY") or str(ai_data.get("api_key", "")).strip(),
         base_url=_env("AI_BASE_URL") or str(ai_data.get("base_url", "https://api.openai.com/v1")).strip(),
         model=_env("AI_MODEL") or str(ai_data.get("model", "gpt-4o-mini")).strip(),
@@ -150,11 +167,18 @@ def _load_ai_config(ai_data: dict[str, Any]) -> AIConfig:
         language=_env("AI_LANGUAGE") or str(ai_data.get("language", "Simplified Chinese")).strip(),
         timeout_seconds=_int(_env("AI_TIMEOUT_SECONDS") or ai_data.get("timeout_seconds", 120), "ai.timeout_seconds"),
     )
+    if config.temperature < 0:
+        raise ConfigError("ai.temperature must be >= 0")
+    if config.max_tokens <= 0:
+        raise ConfigError("ai.max_tokens must be > 0")
+    if config.timeout_seconds <= 0:
+        raise ConfigError("ai.timeout_seconds must be > 0")
+    return config
 
 
 def _load_email_config(email_data: dict[str, Any]) -> EmailConfig:
     mail_to = _email_list(_env("MAIL_TO") or "", email_data.get("to", []))
-    return EmailConfig(
+    config = EmailConfig(
         smtp_host=_env("SMTP_HOST") or str(email_data.get("smtp_host", "")).strip(),
         smtp_port=_int(_env("SMTP_PORT") or email_data.get("smtp_port", 587), "email.smtp_port"),
         smtp_user=_env("SMTP_USER") or str(email_data.get("smtp_user", "")).strip(),
@@ -165,6 +189,9 @@ def _load_email_config(email_data: dict[str, Any]) -> EmailConfig:
         mail_to=mail_to,
         subject_prefix=str(email_data.get("subject_prefix", "Daily arXiv")).strip(),
     )
+    if not 1 <= config.smtp_port <= 65535:
+        raise ConfigError("email.smtp_port must be between 1 and 65535")
+    return config
 
 
 def _load_digest_config(digest_data: dict[str, Any]) -> DigestConfig:

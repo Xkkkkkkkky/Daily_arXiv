@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import html
-import re
 from datetime import date
 
 from .ai_client import DailySummary, PaperSummary
-from .arxiv_client import Paper
+from .arxiv_client import Paper, normalize_arxiv_id
 
 
 def build_subject(prefix: str, report_date: date, paper_count: int) -> str:
@@ -34,7 +33,7 @@ def build_text_digest(summary: DailySummary, papers: list[Paper], report_date: d
 
     lines.append("Papers:")
     for index, paper in enumerate(papers, start=1):
-        insight = insights.get(_normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
+        insight = insights.get(normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
         lines.extend(
             [
                 "",
@@ -106,7 +105,7 @@ def build_html_digest(summary: DailySummary, papers: list[Paper], report_date: d
 
 
 def _paper_card(index: int, paper: Paper, insights: dict[str, PaperSummary]) -> str:
-    insight = insights.get(_normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
+    insight = insights.get(normalize_arxiv_id(paper.arxiv_id), _empty_insight(paper))
     authors = _format_authors(paper)
     comments = _format_comments(paper)
     subjects = _format_subjects(paper)
@@ -219,7 +218,7 @@ def _empty_state() -> str:
 
 
 def _insights_by_id(summary: DailySummary) -> dict[str, PaperSummary]:
-    return {_normalize_arxiv_id(item.arxiv_id): item for item in summary.paper_summaries}
+    return {normalize_arxiv_id(item.arxiv_id): item for item in summary.paper_summaries}
 
 
 def _format_authors(paper: Paper) -> str:
@@ -233,11 +232,6 @@ def _format_comments(paper: Paper) -> str:
 def _format_subjects(paper: Paper) -> str:
     subjects = paper.categories or ((paper.primary_category,) if paper.primary_category else ())
     return ", ".join(subjects) if subjects else "N/A"
-
-
-def _normalize_arxiv_id(value: str) -> str:
-    arxiv_id = value.strip().rsplit("/", 1)[-1]
-    return re.sub(r"v\d+$", "", arxiv_id)
 
 
 def _empty_insight(paper: Paper) -> PaperSummary:

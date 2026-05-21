@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
@@ -123,6 +124,11 @@ def _paper_from_result(result: arxiv.Result, topic: TopicConfig) -> Paper:
         topics=(topic.name,),
         comment=_clean_text(result.comment or ""),
     )
+
+
+def normalize_arxiv_id(value: str) -> str:
+    arxiv_id = value.strip().rsplit("/", 1)[-1]
+    return re.sub(r"v\d+$", "", arxiv_id)
 
 
 def _sort_criterion(value: str) -> arxiv.SortCriterion:

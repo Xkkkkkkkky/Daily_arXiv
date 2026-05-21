@@ -22,6 +22,7 @@ def send_email(config: EmailConfig, subject: str, text_body: str, html_body: str
         with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=30) as smtp:
             if config.smtp_use_tls:
                 smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
             _login_and_send(smtp, config, message)
 
 
