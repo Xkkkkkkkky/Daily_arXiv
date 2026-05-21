@@ -2,22 +2,15 @@ from __future__ import annotations
 
 import sys
 import time
-import socket
-import urllib.error
-import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from email.utils import parsedate_to_datetime
 
-from .config import ArxivConfig, TopicConfig
+import arxiv
+import requests
+
+from .config import ArxivConfig, ConfigError, TopicConfig
 
 
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
-ATOM_NS = "http://www.w3.org/2005/Atom"
-ARXIV_NS = "http://arxiv.org/schemas/atom"
-NS = {"atom": ATOM_NS, "arxiv": ARXIV_NS}
 TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 
@@ -57,53 +50,55 @@ def fetch_new_papers(config: ArxivConfig, now: datetime | None = None) -> list[P
 
 
 def _fetch_topic(topic: TopicConfig, config: ArxivConfig, since: datetime) -> list[Paper]:
-    query = urllib.parse.urlencode(
-        {
-            "search_query": topic.query,
-            "start": 0,
-            "max_results": config.max_results_per_topic,
-            "sortBy": config.sort_by,
-            "sortOrder": config.sort_order,
-        }
+    for attempt in range(config.retry_count + 1):
+        try:
+            return _fetch_topic_once(topic, config, since)
+        except arxiv.HTTPError as exc:
+            if exc.status not in TRANSIENT_HTTP_STATUSES or attempt >= config.retry_count:
+                raise RuntimeError(f"arXiv API returned HTTP {exc.status} after {attempt + 1} attempt(s)") from exc
+            _sleep_before_retry(config, attempt, f"HTTP {exc.status}")
+        except (arxiv.UnexpectedEmptyPageError, requests.exceptions.RequestException) as exc:
+            if attempt >= config.retry_count:
+                raise RuntimeError(f"arXiv API request failed after {attempt + 1} attempt(s): {exc}") from exc
+            _sleep_before_retry(config, attempt, str(exc))
+
+    raise RuntimeError("arXiv API request failed unexpectedly")
+
+
+def _fetch_topic_once(topic: TopicConfig, config: ArxivConfig, since: datetime) -> list[Paper]:
+    client = arxiv.Client(
+        page_size=config.max_results_per_topic,
+        delay_seconds=max(3.0, config.request_delay_seconds),
+        num_retries=0,
     )
-    request = urllib.request.Request(
-        f"{ARXIV_API_URL}?{query}",
-        headers={"User-Agent": "daily-arxiv/0.1 (+https://github.com)"},
+    _set_client_timeout(client, config.timeout_seconds)
+    search = arxiv.Search(
+        query=topic.query,
+        max_results=config.max_results_per_topic,
+        sort_by=_sort_criterion(config.sort_by),
+        sort_order=_sort_order(config.sort_order),
     )
 
-    body = _read_response(request, config)
-    root = ET.fromstring(body)
     papers: list[Paper] = []
-    for entry in root.findall("atom:entry", NS):
-        paper = _parse_entry(entry, topic)
+    for result in client.results(search):
+        paper = _paper_from_result(result, topic)
         if paper.published >= since:
             papers.append(paper)
     return papers
 
 
-def _read_response(request: urllib.request.Request, config: ArxivConfig) -> bytes:
-    for attempt in range(config.retry_count + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=config.timeout_seconds) as response:
-                return response.read()
-        except urllib.error.HTTPError as exc:
-            if exc.code not in TRANSIENT_HTTP_STATUSES or attempt >= config.retry_count:
-                detail = exc.read().decode("utf-8", errors="replace")
-                raise RuntimeError(
-                    f"arXiv API returned HTTP {exc.code} after {attempt + 1} attempt(s): {detail[:500]}"
-                ) from exc
-            retry_after = _retry_after_seconds(exc.headers.get("Retry-After"))
-            _sleep_before_retry(config, attempt, f"HTTP {exc.code}", retry_after)
-        except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
-            if attempt >= config.retry_count:
-                raise RuntimeError(f"arXiv API request failed after {attempt + 1} attempt(s): {exc}") from exc
-            _sleep_before_retry(config, attempt, str(exc), None)
+def _set_client_timeout(client: arxiv.Client, timeout_seconds: int) -> None:
+    original_get = client._session.get
 
-    raise RuntimeError("arXiv API request failed unexpectedly")
+    def get_with_timeout(url: str, **kwargs: object) -> requests.Response:
+        kwargs.setdefault("timeout", timeout_seconds)
+        return original_get(url, **kwargs)
+
+    client._session.get = get_with_timeout
 
 
-def _sleep_before_retry(config: ArxivConfig, attempt: int, reason: str, retry_after: float | None) -> None:
-    delay = retry_after if retry_after is not None else config.retry_backoff_seconds * (attempt + 1)
+def _sleep_before_retry(config: ArxivConfig, attempt: int, reason: str) -> None:
+    delay = config.retry_backoff_seconds * (attempt + 1)
     if delay > 0:
         print(
             f"arXiv request failed with {reason}; retrying in {delay:.0f}s "
@@ -113,70 +108,46 @@ def _sleep_before_retry(config: ArxivConfig, attempt: int, reason: str, retry_af
         time.sleep(delay)
 
 
-def _retry_after_seconds(value: str | None) -> float | None:
-    if not value:
-        return None
-    try:
-        return max(0.0, float(value))
-    except ValueError:
-        try:
-            retry_at = parsedate_to_datetime(value)
-        except (TypeError, ValueError):
-            return None
-        if retry_at.tzinfo is None:
-            retry_at = retry_at.replace(tzinfo=UTC)
-        return max(0.0, (retry_at.astimezone(UTC) - datetime.now(UTC)).total_seconds())
-
-
-def _parse_entry(entry: ET.Element, topic: TopicConfig) -> Paper:
-    arxiv_url = _text(entry, "atom:id")
-    arxiv_id = arxiv_url.rstrip("/").rsplit("/", 1)[-1]
-    primary_category = entry.find("arxiv:primary_category", NS)
-    categories = tuple(
-        category.attrib.get("term", "")
-        for category in entry.findall("atom:category", NS)
-        if category.attrib.get("term")
-    )
-
-    link = arxiv_url
-    pdf_url = ""
-    for link_node in entry.findall("atom:link", NS):
-        rel = link_node.attrib.get("rel")
-        href = link_node.attrib.get("href", "")
-        title = link_node.attrib.get("title")
-        if rel == "alternate" and href:
-            link = href
-        if title == "pdf" and href:
-            pdf_url = href
-
+def _paper_from_result(result: arxiv.Result, topic: TopicConfig) -> Paper:
     return Paper(
-        arxiv_id=arxiv_id,
-        title=_clean_text(_text(entry, "atom:title")),
-        authors=tuple(
-            _clean_text(_text(author, "atom:name"))
-            for author in entry.findall("atom:author", NS)
-            if _text(author, "atom:name")
-        ),
-        abstract=_clean_text(_text(entry, "atom:summary")),
-        published=_parse_datetime(_text(entry, "atom:published")),
-        updated=_parse_datetime(_text(entry, "atom:updated")),
-        link=link,
-        pdf_url=pdf_url,
-        primary_category=primary_category.attrib.get("term", "") if primary_category is not None else "",
-        categories=categories,
+        arxiv_id=result.get_short_id(),
+        title=_clean_text(result.title),
+        authors=tuple(_clean_text(author.name) for author in result.authors if author.name),
+        abstract=_clean_text(result.summary),
+        published=_as_utc(result.published),
+        updated=_as_utc(result.updated),
+        link=result.entry_id,
+        pdf_url=result.pdf_url or "",
+        primary_category=result.primary_category,
+        categories=tuple(result.categories),
         topics=(topic.name,),
-        comment=_clean_text(_text(entry, "arxiv:comment")),
+        comment=_clean_text(result.comment or ""),
     )
 
 
-def _text(node: ET.Element, path: str) -> str:
-    child = node.find(path, NS)
-    return child.text if child is not None and child.text is not None else ""
+def _sort_criterion(value: str) -> arxiv.SortCriterion:
+    normalized = value.strip().lower()
+    for criterion in arxiv.SortCriterion:
+        if criterion.value.lower() == normalized:
+            return criterion
+    valid = ", ".join(criterion.value for criterion in arxiv.SortCriterion)
+    raise ConfigError(f"arxiv.sort_by must be one of: {valid}")
+
+
+def _sort_order(value: str) -> arxiv.SortOrder:
+    normalized = value.strip().lower()
+    for order in arxiv.SortOrder:
+        if order.value.lower() == normalized:
+            return order
+    valid = ", ".join(order.value for order in arxiv.SortOrder)
+    raise ConfigError(f"arxiv.sort_order must be one of: {valid}")
 
 
 def _clean_text(value: str) -> str:
     return " ".join(value.split())
 
 
-def _parse_datetime(value: str) -> datetime:
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

@@ -10,7 +10,7 @@
 - 通过 SMTP 发送 HTML 和纯文本双格式邮件
 - 邮件按论文卡片排版，展示英文原题、中文标题、作者、Comments、Subjects、中文摘要和 AI 重要性评级
 - GitHub Actions 每日定时运行，也支持手动触发
-- 无第三方 Python 依赖，GitHub Actions 不需要安装额外包
+- 使用 `arxiv` Python 包抓取和解析 arXiv API 响应，减少手写 Atom 解析逻辑
 
 ## 快速开始
 
@@ -22,15 +22,21 @@
    cp config.example.toml config.toml
    ```
 
-2. 编辑 `config.toml`，设置 arXiv 领域、收件人、发件人等非敏感配置。
+2. 安装依赖：
 
-3. 本地测试抓取和邮件正文渲染：
+   ```bash
+   python3 -m pip install -r requirements.txt
+   ```
+
+3. 编辑 `config.toml`，设置 arXiv 领域、收件人、发件人等非敏感配置。
+
+4. 本地测试抓取和邮件正文渲染：
 
    ```bash
    python3 -m daily_arxiv.main --config config.toml --skip-ai --no-email
    ```
 
-4. 本地完整运行需要设置环境变量：
+5. 本地完整运行需要设置环境变量：
 
    ```bash
    export AI_API_KEY="your-ai-api-key"
