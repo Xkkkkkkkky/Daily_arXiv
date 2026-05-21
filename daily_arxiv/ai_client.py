@@ -25,6 +25,7 @@ class PaperSummary:
     summary: str
     importance: int
     importance_reason: str
+    raw_response: str = ""
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ def build_fallback_summary(papers: list[Paper], report_date: date) -> DailySumma
         return DailySummary(overview="No new papers matched the configured arXiv topics for this run.")
 
     return DailySummary(
-        overview=f"AI summarization was skipped for {report_date.isoformat()}. Below are abstract-based previews.",
+        overview=_build_fallback_overview(papers, report_date),
         paper_summaries=tuple(_fallback_paper_summary(paper) for paper in papers),
     )
 
@@ -228,7 +229,7 @@ def _fallback_result(
 ) -> _PaperSummaryResult:
     return _PaperSummaryResult(
         index=index,
-        summary=_fallback_paper_summary(paper, reason),
+        summary=_fallback_paper_summary(paper, reason, raw_response),
         raw_response=raw_response,
         used_fallback=True,
         message=message,
@@ -370,18 +371,40 @@ def _extract_paper_summary_object(data: object, paper: Paper) -> dict[str, objec
 
 
 def _build_overview(summaries: list[PaperSummary], report_date: date, fallback_count: int) -> str:
-    total = len(summaries)
-    counts = {rating: 0 for rating in range(1, 6)}
-    for item in summaries:
-        counts[_coerce_importance(item.importance)] += 1
-    distribution = "，".join(f"{rating}分{counts[rating]}篇" for rating in range(5, 0, -1))
-    overview = (
-        f"{report_date.isoformat()} 本次共处理 {total} 篇 arXiv 论文。"
-        f"AI 按统一 1-5 分标准逐篇生成中文标题、摘要与重要性评级；评分分布为：{distribution}。"
+    if not summaries:
+        return f"{report_date.isoformat()} 没有可用于生成趋势总览的论文。"
+
+    ranked = sorted(
+        summaries,
+        key=lambda item: (
+            -_coerce_importance(item.importance),
+            normalize_arxiv_id(item.arxiv_id),
+        ),
     )
+    high_priority = [item for item in ranked if _coerce_importance(item.importance) >= 4]
+    featured = high_priority[:3] or ranked[:3]
+    focus = "；".join(_paper_label(item) for item in featured)
+    high_count = len(high_priority)
+
+    if high_count:
+        trend = (
+            f"其中 {high_count} 篇达到 4 分以上，整体更值得从方法创新、关键观测结果或可复用数据资源的角度优先阅读。"
+        )
+    else:
+        trend = "整体以细分问题、局部验证或专门场景的增量推进为主，适合按个人研究方向筛选阅读。"
+
+    overview = f"今日论文的主要关注点集中在：{focus}。{trend}"
     if fallback_count:
-        overview += f" 其中 {fallback_count} 篇因 AI 响应异常或不可解析使用摘要回退，评级暂按 3/5 展示。"
+        overview += f" 另有 {fallback_count} 篇因 AI 响应异常或不可解析仅基于原始摘要回退，相关判断需保守解读。"
     return overview
+
+
+def _build_fallback_overview(papers: list[Paper], report_date: date) -> str:
+    titles = "；".join(paper.title for paper in papers[:3])
+    return (
+        f"{report_date.isoformat()} 的论文主要覆盖：{titles}。"
+        "由于本次未调用 AI，总览仅依据原始标题与摘要生成，适合用于快速定位候选文章。"
+    )
 
 
 def _build_shortlist(summaries: list[PaperSummary]) -> tuple[str, ...]:
@@ -420,7 +443,11 @@ def _coerce_importance(value: object) -> int:
     return min(5, max(1, importance))
 
 
-def _fallback_paper_summary(paper: Paper, reason: str | None = None) -> PaperSummary:
+def _fallback_paper_summary(
+    paper: Paper,
+    reason: str | None = None,
+    raw_response: str = "",
+) -> PaperSummary:
     abstract = paper.abstract[:260] + ("..." if len(paper.abstract) > 260 else "")
     return PaperSummary(
         arxiv_id=paper.arxiv_id,
@@ -428,11 +455,26 @@ def _fallback_paper_summary(paper: Paper, reason: str | None = None) -> PaperSum
         summary=abstract,
         importance=3,
         importance_reason=reason or "AI 未提供结构化评级，暂按中等重要性展示。",
+        raw_response=_raw_response_excerpt(_paper_raw_response(paper, raw_response)),
     )
 
 
 def _paper_label(summary: PaperSummary) -> str:
     return summary.chinese_title or summary.summary[:40]
+
+
+def _raw_response_excerpt(value: str, max_chars: int = 1800) -> str:
+    stripped = value.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    return stripped[:max_chars].rstrip() + "\n... [truncated]"
+
+
+def _paper_raw_response(paper: Paper, raw_response: str) -> str:
+    prefix = f"{paper.arxiv_id}\n"
+    if raw_response.startswith(prefix):
+        return raw_response[len(prefix) :]
+    return raw_response
 
 
 def _short_error(exc: BaseException) -> str:
