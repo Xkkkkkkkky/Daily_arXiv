@@ -12,7 +12,7 @@ allow_fetch_failure = true
 
 # Add any number of top-level [[topics]] blocks.
 [[topics]]
-name = "Computer Science - Performance"
+name = "Performance - Computer Science"
 query = "cat:cs.PF"
 
 
