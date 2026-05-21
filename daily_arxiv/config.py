@@ -104,6 +104,16 @@ def validate_email_config(config: EmailConfig) -> None:
         raise ConfigError("Missing email configuration: " + ", ".join(missing))
     if config.smtp_use_tls and config.smtp_use_ssl:
         raise ConfigError("email.smtp_use_tls and email.smtp_use_ssl cannot both be true")
+    if config.smtp_port == 465 and not config.smtp_use_ssl:
+        raise ConfigError(
+            "email.smtp_port=465 usually requires implicit SSL: set SMTP_USE_SSL=true "
+            "and SMTP_USE_TLS=false"
+        )
+    if config.smtp_port == 587 and config.smtp_use_ssl:
+        raise ConfigError(
+            "email.smtp_port=587 usually requires STARTTLS: set SMTP_USE_TLS=true "
+            "and SMTP_USE_SSL=false"
+        )
 
 
 def _load_arxiv_config(data: dict[str, Any]) -> ArxivConfig:

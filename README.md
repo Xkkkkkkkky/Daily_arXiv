@@ -115,6 +115,7 @@ Use environment variables locally or GitHub Actions Secrets in CI.
 | `MAIL_FROM_NAME` | Sender display name |
 | `MAIL_TO` | Recipients, comma-separated |
 
+
 Example local run:
 
 本地示例：
