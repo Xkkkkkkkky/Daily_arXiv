@@ -56,10 +56,25 @@ def _format_sender(config: EmailConfig) -> str:
 
 def _smtp_error_message(config: EmailConfig, exc: BaseException) -> str:
     detail = str(exc).strip() or exc.__class__.__name__
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        detail = _smtp_response_detail(exc) or detail
+        return (
+            f"Failed to authenticate with SMTP {config.smtp_host}:{config.smtp_port} "
+            f"using {_smtp_mode(config)}. {detail}. {_smtp_auth_hint(config)}"
+        )
     return (
         f"Failed to send email via SMTP {config.smtp_host}:{config.smtp_port} "
         f"using {_smtp_mode(config)}. {detail}. {_smtp_hint(config)}"
     )
+
+
+def _smtp_response_detail(exc: smtplib.SMTPResponseException) -> str:
+    response = exc.smtp_error
+    if isinstance(response, bytes):
+        response_text = response.decode("utf-8", errors="replace")
+    else:
+        response_text = str(response)
+    return f"SMTP server returned {exc.smtp_code}: {response_text.strip()}"
 
 
 def _smtp_mode(config: EmailConfig) -> str:
@@ -85,4 +100,28 @@ def _smtp_hint(config: EmailConfig) -> str:
     return (
         "Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and the TLS/SSL mode. "
         "Use SSL for port 465, or STARTTLS for port 587."
+    )
+
+
+def _smtp_auth_hint(config: EmailConfig) -> str:
+    host = config.smtp_host.lower()
+    provider_hint = ""
+    if "163.com" in host or "126.com" in host or "yeah.net" in host:
+        provider_hint = (
+            " For NetEase/163 mail, enable POP3/SMTP/IMAP in mailbox settings and use the client "
+            "authorization code as SMTP_PASSWORD, not the web login password."
+        )
+    elif "qq.com" in host:
+        provider_hint = (
+            " For QQ mail, enable SMTP and use the generated authorization code as SMTP_PASSWORD."
+        )
+    elif "outlook" in host or "office365" in host:
+        provider_hint = (
+            " For Outlook/Microsoft mail, make sure SMTP AUTH is allowed and use an app password when MFA is enabled."
+        )
+    return (
+        "Check that SMTP_USER is the provider login account, SMTP_PASSWORD is an SMTP/app password or "
+        "authorization code, GitHub Secrets do not contain extra quotes or spaces, and MAIL_FROM is the same "
+        "mailbox or an authorized sender for that account."
+        f"{provider_hint}"
     )

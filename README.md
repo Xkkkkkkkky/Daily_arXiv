@@ -118,6 +118,17 @@ Use environment variables locally or GitHub Actions Secrets in CI.
 | `MAIL_TO` | Recipients, comma-separated |
 
 
+SMTP authentication / SMTP 认证：
+
+- `SMTP_PASSWORD` is usually an SMTP/app password or mailbox authorization code, not the web login password.
+- `SMTP_USER` should normally be the full mailbox address, and `MAIL_FROM` should match it or be an authorized sender.
+- For 163/126/QQ mail, enable POP3/SMTP/IMAP in mailbox settings before generating the authorization code.
+
+- `SMTP_PASSWORD` 通常是 SMTP 授权码或应用密码，不是网页登录密码。
+- `SMTP_USER` 一般填写完整邮箱地址，`MAIL_FROM` 应与其一致，或必须是该账号允许的发件地址。
+- 163/126/QQ 邮箱需要先在邮箱设置中开启 POP3/SMTP/IMAP，再生成授权码。
+
+
 Example local run:
 
 本地示例：

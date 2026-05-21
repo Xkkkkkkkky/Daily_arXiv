@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import date
 
@@ -13,6 +14,8 @@ from .config import AIConfig, ConfigError
 
 
 StatusLogger = Callable[[str], None]
+AI_RESPONSE_RETRY_COUNT = 2
+AI_RESPONSE_RETRY_BACKOFF_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -64,39 +67,41 @@ def summarize_papers(
     )
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = {}
-        for index, paper in enumerate(papers, start=1):
-            _log(status, f"AI: submitting summary {index}/{total_count} for {paper.arxiv_id}")
-            future = executor.submit(_summarize_one_paper, paper, config, report_date, index, total_count)
-            futures[future] = (index, paper)
+        pending: dict[Future[_PaperSummaryResult], tuple[int, Paper]] = {}
+        paper_items = iter(enumerate(papers, start=1))
 
-        for future in as_completed(futures):
-            index, paper = futures[future]
+        def submit_next() -> None:
             try:
-                result = future.result()
-            except Exception as exc:
-                result = _fallback_result(
-                    paper,
-                    index,
-                    f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
-                    f"request failed: {_short_error(exc)}",
-                )
+                index, paper = next(paper_items)
+            except StopIteration:
+                return
+            _log(status, f"AI: scheduling summary {index}/{total_count} for {paper.arxiv_id}")
+            future = executor.submit(_summarize_one_paper, paper, config, report_date, index, total_count, status)
+            pending[future] = (index, paper)
 
-            summaries[result.index - 1] = result.summary
-            raw_responses[result.index - 1] = result.raw_response
-            if result.used_fallback:
-                fallback_count += 1
-                _log(
-                    status,
-                    f"AI: summary {result.index}/{total_count} for {paper.arxiv_id} "
-                    f"used fallback: {result.message}",
-                )
-            else:
-                _log(
-                    status,
-                    f"AI: parsed summary {result.index}/{total_count} for {paper.arxiv_id} "
-                    f"with importance {result.summary.importance}/5",
-                )
+        for _ in range(worker_count):
+            submit_next()
+
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                index, paper = pending.pop(future)
+                result = _resolve_summary_future(future, paper, index)
+                _store_summary_result(result, summaries, raw_responses)
+                if result.used_fallback:
+                    fallback_count += 1
+                    _log(
+                        status,
+                        f"AI: summary {result.index}/{total_count} for {paper.arxiv_id} "
+                        f"used fallback: {result.message}",
+                    )
+                else:
+                    _log(
+                        status,
+                        f"AI: parsed summary {result.index}/{total_count} for {paper.arxiv_id} "
+                        f"with importance {result.summary.importance}/5",
+                    )
+                submit_next()
 
     final_summaries = tuple(summary for summary in summaries if summary is not None)
 
@@ -106,6 +111,27 @@ def summarize_papers(
         shortlist=_build_shortlist(list(final_summaries)),
         raw_text="\n\n".join(item for item in raw_responses if item),
     )
+
+
+def _resolve_summary_future(future: Future[_PaperSummaryResult], paper: Paper, index: int) -> _PaperSummaryResult:
+    try:
+        return future.result()
+    except Exception as exc:
+        return _fallback_result(
+            paper,
+            index,
+            f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
+            f"request failed: {_short_error(exc)}",
+        )
+
+
+def _store_summary_result(
+    result: _PaperSummaryResult,
+    summaries: list[PaperSummary | None],
+    raw_responses: list[str],
+) -> None:
+    summaries[result.index - 1] = result.summary
+    raw_responses[result.index - 1] = result.raw_response
 
 
 def build_fallback_summary(papers: list[Paper], report_date: date) -> DailySummary:
@@ -124,34 +150,73 @@ def _summarize_one_paper(
     report_date: date,
     index: int,
     total_count: int,
+    status: StatusLogger | None,
 ) -> _PaperSummaryResult:
-    try:
-        content = _request_paper_summary(paper, config, report_date, index, total_count)
-    except Exception as exc:
-        return _fallback_result(
-            paper,
-            index,
-            f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
-            f"request failed: {_short_error(exc)}",
+    last_raw_response = ""
+    for attempt in range(1, AI_RESPONSE_RETRY_COUNT + 2):
+        _log(
+            status,
+            f"AI: running request {index}/{total_count} for {paper.arxiv_id} "
+            f"(attempt {attempt}/{AI_RESPONSE_RETRY_COUNT + 1})",
         )
+        try:
+            content = _request_paper_summary(paper, config, report_date, index, total_count)
+        except Exception as exc:
+            if attempt > AI_RESPONSE_RETRY_COUNT:
+                return _fallback_result(
+                    paper,
+                    index,
+                    f"AI 请求失败（{_short_error(exc)}），暂按摘要内容与中等重要性展示。",
+                    f"request failed after retries: {_short_error(exc)}",
+                )
+            _wait_before_ai_retry(status, paper, index, total_count, attempt, _short_error(exc))
+            continue
 
-    paper_summary = _parse_paper_summary(content, paper)
-    raw_response = f"{paper.arxiv_id}\n{content}"
-    if paper_summary is None:
-        return _fallback_result(
-            paper,
-            index,
-            "AI 未返回可解析的结构化结果，暂按摘要内容与中等重要性展示。",
-            "response was not valid structured JSON",
-            raw_response,
-        )
-    return _PaperSummaryResult(
-        index=index,
-        summary=paper_summary,
-        raw_response=raw_response,
-        used_fallback=False,
-        message="",
+        last_raw_response = f"{paper.arxiv_id}\n{content}"
+        paper_summary = _parse_paper_summary(content, paper)
+        if paper_summary is not None:
+            return _PaperSummaryResult(
+                index=index,
+                summary=paper_summary,
+                raw_response=last_raw_response,
+                used_fallback=False,
+                message="",
+            )
+
+        if attempt > AI_RESPONSE_RETRY_COUNT:
+            return _fallback_result(
+                paper,
+                index,
+                "AI 多次未返回可解析的结构化结果，暂按摘要内容与中等重要性展示。",
+                "response was not valid structured JSON after retries",
+                last_raw_response,
+            )
+        _wait_before_ai_retry(status, paper, index, total_count, attempt, "response was not valid structured JSON")
+
+    return _fallback_result(
+        paper,
+        index,
+        "AI 未返回可解析的结构化结果，暂按摘要内容与中等重要性展示。",
+        "response was not valid structured JSON",
+        last_raw_response,
     )
+
+
+def _wait_before_ai_retry(
+    status: StatusLogger | None,
+    paper: Paper,
+    index: int,
+    total_count: int,
+    attempt: int,
+    reason: str,
+) -> None:
+    delay = AI_RESPONSE_RETRY_BACKOFF_SECONDS * attempt
+    _log(
+        status,
+        f"AI: retrying request {index}/{total_count} for {paper.arxiv_id} "
+        f"in {delay:.1f}s after {reason}",
+    )
+    time.sleep(delay)
 
 
 def _fallback_result(
