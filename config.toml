@@ -1,6 +1,6 @@
 [arxiv]
 max_results_per_topic = 50
-lookback_days = 2
+lookback_days = 1
 timezone = "Asia/Shanghai"
 sort_by = "submittedDate"
 sort_order = "descending"
