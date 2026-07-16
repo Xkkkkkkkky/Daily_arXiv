@@ -8,3 +8,5 @@ venv/
 private
 .env
 config.local.toml
+.DS_store
+config.toml
