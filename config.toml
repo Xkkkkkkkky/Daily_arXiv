@@ -10,34 +10,22 @@ retry_count = 2
 retry_backoff_seconds = 10.0
 allow_fetch_failure = true
 
-# Add any number of top-level [[topics]] blocks.
+# Focus on AI infrastructure, parallel/data systems, and astronomy technology.
 [[topics]]
-name = "Instrumentation and Methods for Astrophysics - ASTROPHYSICS"
+name = "Astronomical Instrumentation and Methods"
 query = "cat:astro-ph.IM"
 
-#[[topics]]
-#name = "Artificial Intelligence - Computer Science"
-#query = "cat:cs.AI"
+[[topics]]
+name = "AI Infrastructure and Performance"
+query = "(cat:cs.AR OR cat:cs.DC OR cat:cs.PF) AND (all:\"artificial intelligence\" OR all:\"machine learning\" OR all:\"large language model\" OR all:LLM OR all:GPU OR all:accelerator OR all:inference)"
 
 [[topics]]
-name = "Distributed, Parallel, and Cluster Computing - Computer Science"
-query = "cat:cs.DC"
+name = "Parallel and Distributed Computing"
+query = "cat:cs.DC OR cat:cs.PF"
 
 [[topics]]
-name = "Graphics - Computer Science"
-query = "cat:cs.GR"
-
-[[topics]]
-name = "Multiagent Systems - Computer Science"
-query = "cat:cs.MA"
-
-[[topics]]
-name = "Multimedia - Computer Science"
-query = "cat:cs.MM"
-
-[[topics]]
-name = "Performance - Computer Science"
-query = "cat:cs.PF"
+name = "Big Data and Database Systems"
+query = "cat:cs.DB OR (cat:cs.DC AND (all:\"big data\" OR all:\"data-intensive\" OR all:\"data processing\" OR all:\"data analytics\"))"
 
 [ai]
 base_url = "https://api.deepseek.com"
